@@ -70,14 +70,14 @@ void setup() {
   Serial.print(versionMinor);
 
   Wire.speed = 400;
-
+/*
   //Start BLE Advertisement
   RFduinoBLE.advertisementInterval = 675;
   RFduinoBLE.deviceName = identityChars;
   RFduinoBLE.advertisementData = idChars;
   RFduinoBLE.txPowerLevel = +4;
   RFduinoBLE.begin();
-
+*/
   //Print unit info on display
   lcd.begin(16, 2);
   lcd.clear();
@@ -108,7 +108,7 @@ void setup() {
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
 
-  state = S_SETUP;
+  state = S_PID;
   lcd.clear();
 }
 
@@ -136,37 +136,37 @@ void loop() {
         lcd.setCursor(0, 1);
         lcdPrintNumberPadded(faderTemperatureVal, 5, ' ');
       }
-
       state = S_SETUP;
       break;
     case S_PID :
-      if (frameCount % 10 == 0) {
-        faderRangePot0 = round(faderRangePot0 * 0.75 + faderRangePots.readADC_SingleEnded(0) * 0.25);
-        pidP = constrain(mapFloat(faderRangePot0, 20, 17100, 0.0, 2.0), 0.0, 2.0);
-      } else if (frameCount % 10 == 1) {
-        faderRangePot1 = round(faderRangePot1 * 0.75 + faderRangePots.readADC_SingleEnded(1) * 0.25);
-        pidI = constrain(mapFloat(faderRangePot1, 20, 17100,  0.0, 2.0), 0.0, 2.0);
-      } else if (frameCount % 10 == 2) {
-        faderRangePot2 = round(faderRangePot2 * 0.75 + faderRangePots.readADC_SingleEnded(2) * 0.25);
-        pidD = constrain(mapFloat(faderRangePot2, 20, 17100,  0.0, 2.0), 0.0, 2.0);
-      } else if (frameCount % 10 == 3) {
-        faderRangePot3 = round(faderRangePot3 * 0.75 + faderRangePots.readADC_SingleEnded(3) * 0.25);
-        pidGain = constrain(mapFloat(faderRangePot3, 20, 17100,  0.0, 2.0), 0.0, 2.0);
-      }
-
-      if (frameCount % 10 == 8) {
-        faderTemperature.setGainP(round((double)pidP * 1023.0 * pidGain));
-        faderTemperature.setGainI(round((double)pidI * 1023.0 * pidGain));
-        faderTemperature.setGainD(round((double)pidD * 1023.0 * pidGain));
-      }
-
+      // faderRangePot0 = round(faderRangePot0 * 0.75 + faderRangePots.readADC_SingleEnded(0) * 0.25);
+      faderRangePot0 = faderRangePots.readADC_SingleEnded(0);
+      Serial.print("faderRangePot0:  ");
+      Serial.print(faderRangePot0);
+      Serial.print("\t");
+      pidP = constrain(mapFloat(faderRangePot0, 20, 17100, 0.0, 2.0), 0.0, 2.0);
+      faderRangePot1 = round(faderRangePot1 * 0.75 + faderRangePots.readADC_SingleEnded(1) * 0.25);
+      pidI = constrain(mapFloat(faderRangePot1, 20, 17100,  0.0, 2.0), 0.0, 2.0);
+      faderRangePot2 = round(faderRangePot2 * 0.75 + faderRangePots.readADC_SingleEnded(2) * 0.25);
+      pidD = constrain(mapFloat(faderRangePot2, 20, 17100,  0.0, 2.0), 0.0, 2.0);
+      faderRangePot3 = round(faderRangePot3 * 0.75 + faderRangePots.readADC_SingleEnded(3) * 0.25);
+      pidGain = constrain(mapFloat(faderRangePot3, 20, 17100,  0.0, 2.0), 0.0, 2.0);
+/*
+      faderTemperature.setGainP(round((double)pidP * 1023.0 * pidGain));
+      faderTemperature.setGainI(round((double)pidI * 1023.0 * pidGain));
+      faderTemperature.setGainD(round((double)pidD * 1023.0 * pidGain));
+*/
       faderIntensityVal = faderIntensity.getPosition();
+      Serial.print("Int:  ");
+      Serial.print(faderIntensityVal);
+      Serial.print("\t");
       faderTemperatureVal = faderTemperature.getPosition();
-      
-      if (frameCount % 10 == 0) {
-        faderTemperatureDest = faderIntensityVal;
-        faderTemperature.setPosition(faderTemperatureDest);
-      }
+      Serial.print("Temp: ");
+      Serial.println(faderTemperatureVal);
+
+      faderTemperatureDest = faderIntensityVal;
+      faderTemperature.setPosition(faderTemperatureDest);
+
       if (thisFrameMillis % 2000 < 500) {
         lcd.setCursor(0, 0);
         lcdPrintNumberPadded(faderRangePot0, 5, ' ');
