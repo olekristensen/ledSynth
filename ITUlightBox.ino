@@ -70,14 +70,14 @@ void setup() {
   Serial.print(versionMinor);
 
   Wire.speed = 400;
-/*
+
   //Start BLE Advertisement
   RFduinoBLE.advertisementInterval = 675;
   RFduinoBLE.deviceName = identityChars;
   RFduinoBLE.advertisementData = idChars;
   RFduinoBLE.txPowerLevel = +4;
   RFduinoBLE.begin();
-*/
+
   //Print unit info on display
   lcd.begin(16, 2);
   lcd.clear();
@@ -140,12 +140,16 @@ void loop() {
       break;
     case S_PID :
       // faderRangePot0 = round(faderRangePot0 * 0.75 + faderRangePots.readADC_SingleEnded(0) * 0.25);
+      faderRangePots.waitForConvertionComplete();
       faderRangePot0 = faderRangePots.readADC_SingleEnded(0);
       Serial.print("faderRangePot0:  ");
       Serial.print(faderRangePot0);
       Serial.print("\t");
       pidP = constrain(mapFloat(faderRangePot0, 20, 17100, 0.0, 2.0), 0.0, 2.0);
-      faderRangePot1 = round(faderRangePot1 * 0.75 + faderRangePots.readADC_SingleEnded(1) * 0.25);
+      faderRangePot1 = faderRangePots.readADC_SingleEnded(1);
+      Serial.print("faderRangePot1:  ");
+      Serial.print(faderRangePot1);
+      Serial.print("\t");      
       pidI = constrain(mapFloat(faderRangePot1, 20, 17100,  0.0, 2.0), 0.0, 2.0);
       faderRangePot2 = round(faderRangePot2 * 0.75 + faderRangePots.readADC_SingleEnded(2) * 0.25);
       pidD = constrain(mapFloat(faderRangePot2, 20, 17100,  0.0, 2.0), 0.0, 2.0);
@@ -183,10 +187,10 @@ void loop() {
         lcdPrintNumberPadded(pidGain * 100.0, 6, ' ');
       }
 
-      lcd.setCursor(12, 0);
-      lcdPrintNumberPadded(faderIntensityVal, 4, ' ');
-      lcd.setCursor(12, 1);
-      lcdPrintNumberPadded(faderTemperatureDest - faderTemperatureVal, 4, ' ');
+      lcd.setCursor(11, 0);
+      lcdPrintNumberPadded(faderIntensityVal, 5, ' ');
+      lcd.setCursor(11, 1);
+      lcdPrintNumberPadded(faderTemperatureDest - faderTemperatureVal, 5, ' ');
 
       ;
       break;
