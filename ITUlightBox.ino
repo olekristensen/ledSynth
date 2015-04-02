@@ -6,14 +6,16 @@ const String identityString = "LightSynth";
 const char *identityChars = "LightSynth";
 
 const int versionMajor = 0;
-const int versionMinor = 2;
+const int versionMinor = 3;
 
 #include <RFduinoBLE.h>
 #include <Wire.h>
 #include <LiquidTWI.h>               // Display
 #include <Adafruit_ADS1015.h>        // Analog Digital Converter
-#include <Adafruit_PWMServoDriver.h> // PWM
-#include <OpenServo.h>               // Motorfaders
+#include <Adafruit_MotorShield.h>    // Motor Shield
+//#include <Adafruit_PWMServoDriver.h> // PWM
+#include <PID_v1.h>
+
 
 // DISPLAY
 
@@ -21,27 +23,40 @@ LiquidTWI lcd(0);                     //0x20
 
 // FADERS
 
-OpenServo faderIntensity(0x10);       //0x10
+Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x61);
+
+double faderMotorSpeed = 156;
+
+double pidP = .75;
+double pidI = 20;
+double pidD = 0.0002;
+
+long pidTimeToAcquire = 0;                    // How long in millis to acquire new target.
+const int pidSampleRate = 10;                  // Calling compute() every ms.
+
+Adafruit_DCMotor *intensityMotor = AFMS.getMotor(1);
 long millisLastFadeIntensity;
-int faderIntensityDest = 0;
-int faderIntensityVal = 0;
+double faderIntensitySetpoint = 0;
+double faderIntensityPos = 0;
+double faderIntensitySpeed = 0;
+PID pidIntensity(&faderIntensityPos, &faderIntensitySpeed, &faderIntensitySetpoint, pidP, pidI, pidD, DIRECT);
 
-OpenServo faderTemperature(0x11);     //0x11
+Adafruit_DCMotor *temperatureMotor = AFMS.getMotor(2);
 long millisLastFadeTemperature;
-int faderTemperatureDest = 0;
-int faderTemperatureVal = 0;
-
-float pidP = 0.0;
-float pidI = 0;
-float pidD = 0;
-float pidGain = 0;
+double faderTemperatureSetpoint = 0;
+double faderTemperaturePos = 0;
+double faderTemperatureSpeed = 0;
+PID pidTemperature(&faderTemperaturePos, &faderTemperatureSpeed, &faderTemperatureSetpoint, pidP, pidI, pidD, DIRECT);
 
 // POTMETERS
 
-Adafruit_ADS1115 faderRangePots(0x49);/*16-bit*/ //0x49
-int16_t faderRangePot0, faderRangePot1, faderRangePot2, faderRangePot3;
+Adafruit_ADS1115 faderIntensityPots(0x49);/*16-bit*/ //0x49
+int16_t faderIntensityPot0, faderIntensityPot1, faderIntensityPot2, faderIntensityPot3;
 double potIntensityRangeFrom;
 double potIntensityRangeTo;
+
+Adafruit_ADS1115 faderTemperaturePots(0x4A);/*16-bit*/ //0x4A
+int16_t faderTemperaturePot0, faderTemperaturePot1, faderTemperaturePot2, faderTemperaturePot3;
 double potTemperatureRangeFrom;
 double potTemperatureRangeTo;
 
@@ -51,7 +66,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 // CONTROL
 
-enum State { S_SETUP, S_ADDRESS_OPENSERVO, S_PID, S_RUNNING };
+enum State { S_SETUP, S_PID_TEST, S_RUNNING };
 int state = S_SETUP;
 long millisLastFrame = 0;
 long frameCount = 0;
@@ -91,108 +106,88 @@ void setup() {
   lcd.print(".");
   lcd.print(versionMinor);
 
-  // The ADC input range (or gain) can be changed via the following
-  // functions, but be careful never to exceed VDD +0.3V max, or to
-  // exceed the upper and lower limits if you adjust the input range!
-  // Setting these values incorrectly may destroy your ADC!
-  //                                                                ADS1015  ADS1115
-  //                                                                -------  -------
-  faderRangePots.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
-  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
-  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
-  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
-  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
-  faderRangePots.begin();
+  AFMS.begin(55);  // create with the default frequency 1.6KHz
+
+  intensityMotor->setSpeed(225);
+  temperatureMotor->setSpeed(225);
+
+  pidTemperature.SetMode(AUTOMATIC);
+  pidTemperature.SetSampleTime(pidSampleRate);           // Sets the sample rate
+  pidTemperature.SetOutputLimits(0 - faderMotorSpeed, faderMotorSpeed);        // Set max speed for DC motors
+
+  pidIntensity.SetMode(AUTOMATIC);
+  pidIntensity.SetSampleTime(pidSampleRate);           // Sets the sample rate
+  pidIntensity.SetOutputLimits(0 - faderMotorSpeed, faderMotorSpeed);        // Set max speed for DC motors
+
+  faderIntensityPots.setGain(GAIN_TWOTHIRDS);    // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
+  faderTemperaturePots.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
+  faderIntensityPots.begin();
+  faderTemperaturePots.begin();
 
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
 
-  state = S_PID;
+  state = S_PID_TEST;
   lcd.clear();
 }
 
 void loop() {
   long thisFrameMillis = millis();
+  double t = thisFrameMillis * 0.001 * 0.5;
   switch (state) {
     case S_SETUP :
-      faderTemperature.enable();
-      faderIntensity.enable();
-      faderIntensity.disable();
-      state = S_PID;
+      state = S_PID_TEST;
       ;
       break;
-    case S_ADDRESS_OPENSERVO :
-      lcd.clear();
-      lcd.print("setting address");
-      comm_i2c(0x10, 0x84);       // write enable
-      send_i2c(0x10, 0x20, 0x11); // set address to 0x11
-      comm_i2c(0x10, 0x86);       // save registers
-      delay(2000);
-      lcd.clear();
-      lcd.print("testing");
-      while (millis() < thisFrameMillis + 10000) {
-        faderTemperatureVal = faderTemperature.getPosition();
-        lcd.setCursor(0, 1);
-        lcdPrintNumberPadded(faderTemperatureVal, 5, ' ');
-      }
-      state = S_SETUP;
-      break;
-    case S_PID :
-      // faderRangePot0 = round(faderRangePot0 * 0.75 + faderRangePots.readADC_SingleEnded(0) * 0.25);
-      faderRangePots.waitForConvertionComplete();
-      faderRangePot0 = faderRangePots.readADC_SingleEnded(0);
-      Serial.print("faderRangePot0:  ");
-      Serial.print(faderRangePot0);
-      Serial.print("\t");
-      pidP = constrain(mapFloat(faderRangePot0, 20, 17100, 0.0, 2.0), 0.0, 2.0);
-      faderRangePot1 = faderRangePots.readADC_SingleEnded(1);
-      Serial.print("faderRangePot1:  ");
-      Serial.print(faderRangePot1);
-      Serial.print("\t");      
-      pidI = constrain(mapFloat(faderRangePot1, 20, 17100,  0.0, 2.0), 0.0, 2.0);
-      faderRangePot2 = round(faderRangePot2 * 0.75 + faderRangePots.readADC_SingleEnded(2) * 0.25);
-      pidD = constrain(mapFloat(faderRangePot2, 20, 17100,  0.0, 2.0), 0.0, 2.0);
-      faderRangePot3 = round(faderRangePot3 * 0.75 + faderRangePots.readADC_SingleEnded(3) * 0.25);
-      pidGain = constrain(mapFloat(faderRangePot3, 20, 17100,  0.0, 2.0), 0.0, 2.0);
-/*
-      faderTemperature.setGainP(round((double)pidP * 1023.0 * pidGain));
-      faderTemperature.setGainI(round((double)pidI * 1023.0 * pidGain));
-      faderTemperature.setGainD(round((double)pidD * 1023.0 * pidGain));
-*/
-      faderIntensityVal = faderIntensity.getPosition();
-      Serial.print("Int:  ");
-      Serial.print(faderIntensityVal);
-      Serial.print("\t");
-      faderTemperatureVal = faderTemperature.getPosition();
-      Serial.print("Temp: ");
-      Serial.println(faderTemperatureVal);
+    case S_PID_TEST :
+      // FADER TEST
 
-      faderTemperatureDest = faderIntensityVal;
-      faderTemperature.setPosition(faderTemperatureDest);
+      //Intensity
 
-      if (thisFrameMillis % 2000 < 500) {
-        lcd.setCursor(0, 0);
-        lcdPrintNumberPadded(faderRangePot0, 5, ' ');
-        lcdPrintNumberPadded(faderRangePot1, 6, ' ');
-        lcd.setCursor(0, 1);
-        lcdPrintNumberPadded(faderRangePot2, 5, ' ');
-        lcdPrintNumberPadded(faderRangePot3, 6, ' ');
-      } else if (thisFrameMillis % 2000 < 1000) {
-        lcd.setCursor(0, 0);
-        lcdPrintNumberPadded(pidP * 100.0, 5, ' ');
-        lcdPrintNumberPadded(pidI * 100.0, 6, ' ');
-        lcd.setCursor(0, 1);
-        lcdPrintNumberPadded(pidD * 100.0, 5, ' ');
-        lcdPrintNumberPadded(pidGain * 100.0, 6, ' ');
+      faderIntensityPot0 = faderIntensityPots.readADC_SingleEnded(0);
+      faderIntensityPos = constrain(mapFloat(faderIntensityPot0, 20, 17100,  0.0, 1023.0), 0.0, 1023.0);
+
+      if (pidIntensity.Compute()) {
+        intensityMotor->setSpeed(abs(faderIntensitySpeed));
+        if (faderIntensitySpeed < 0.0) {
+          intensityMotor->run(BACKWARD);
+        } else {
+          intensityMotor->run(FORWARD);
+        }
       }
 
-      lcd.setCursor(11, 0);
-      lcdPrintNumberPadded(faderIntensityVal, 5, ' ');
-      lcd.setCursor(11, 1);
-      lcdPrintNumberPadded(faderTemperatureDest - faderTemperatureVal, 5, ' ');
+      if (fmod(t, 3.0) < 2.0)
+        faderIntensitySetpoint = mapFloat(sin(sin(t * 2.0) * fmod(t, 3.0)), -1.0, 1.0, 24.0, 1000.0);
 
-      ;
+      //Temperature
+
+      faderTemperaturePot0 = faderTemperaturePots.readADC_SingleEnded(0);
+      faderTemperaturePos = constrain(mapFloat(faderTemperaturePot0, 20, 17100,  0.0, 1023.0), 0.0, 1023.0);
+
+      if (pidTemperature.Compute()) {
+        temperatureMotor->setSpeed(abs(faderTemperatureSpeed));
+        if (faderTemperatureSpeed < 0.0) {
+          temperatureMotor->run(BACKWARD);
+        } else {
+          temperatureMotor->run(FORWARD);
+        }
+      }
+
+      t += 0.5;
+
+      if (fmod(t, 3.0) < 2.0)
+        faderTemperatureSetpoint = mapFloat(sin(sin(t * 2.0) * fmod(t, 3.0)), -1.0, 1.0, 24.0, 1000.0);
+
+      // Display
+
+      lcd.setCursor(0, 0);
+      lcdPrintNumberPadded(faderIntensityPot0, 5, ' ');
+      lcdPrintNumberPadded(faderIntensitySetpoint, 5, ' ');
+      lcdPrintNumberPadded(faderIntensitySetpoint - faderIntensityPos , 5, ' ');
+      lcd.setCursor(0, 1);      
+      lcdPrintNumberPadded(faderTemperaturePot0, 5, ' ');
+      lcdPrintNumberPadded(faderTemperatureSetpoint, 5, ' ');
+      lcdPrintNumberPadded(faderTemperatureSetpoint - faderTemperaturePos , 5, ' ');
       break;
     case S_RUNNING  :
       ;
