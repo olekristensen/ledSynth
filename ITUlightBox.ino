@@ -33,25 +33,17 @@ const double faderPidD = 0.0002;
 
 const int faderPidSampleRate = 10;                  // Calling compute() every 10 ms.
 
+Adafruit_ADS1115 faderIntensityPots(0x49);/*16-bit*/ //0x49
 Fader faderIntensity(
   AFMS.getMotor(1),
+  &faderIntensityPots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
-
-Fader faderTemperature(
-  AFMS.getMotor(2),
-  faderPidP, faderPidI, faderPidD, faderPidSampleRate);
-
-// POTMETERS
-
-Adafruit_ADS1115 faderIntensityPots(0x49);/*16-bit*/ //0x49
-int16_t faderIntensityPot0, faderIntensityPot1, faderIntensityPot2, faderIntensityPot3;
-double potIntensityRangeFrom;
-double potIntensityRangeTo;
 
 Adafruit_ADS1115 faderTemperaturePots(0x4A);/*16-bit*/ //0x4A
-int16_t faderTemperaturePot0, faderTemperaturePot1, faderTemperaturePot2, faderTemperaturePot3;
-double potTemperatureRangeFrom;
-double potTemperatureRangeTo;
+Fader faderTemperature(
+  AFMS.getMotor(2),
+  &faderTemperaturePots, 0,
+  faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 
 // PWM
 
@@ -59,7 +51,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 // CONTROL
 
-enum State { S_SETUP, S_PID_TEST, S_RUNNING };
+enum State { S_SETUP, S_FADER_CALIBRATE, S_PID_TEST, S_RUNNING };
 int state = S_SETUP;
 long millisLastFrame = 0;
 long frameCount = 0;
@@ -67,6 +59,7 @@ long frameCount = 0;
 void setup() {
 
   Serial.begin(9600); // set up Serial library at 9600 bps
+  Wire.speed = 400;
 
   //Print unit info on serial
   Serial.println(identityString);
@@ -77,19 +70,9 @@ void setup() {
   Serial.print(".");
   Serial.print(versionMinor);
 
-  Wire.speed = 400;
-
-  //Start BLE Advertisement
-  RFduinoBLE.advertisementInterval = 675;
-  RFduinoBLE.deviceName = identityChars;
-  RFduinoBLE.advertisementData = idChars;
-  RFduinoBLE.txPowerLevel = +4;
-  RFduinoBLE.begin();
-
-  //Print unit info on display
   lcd.begin(16, 2);
   lcd.clear();
-  // Print a message to the LCD.
+  //Print unit info on display
   lcd.print(identityString);
   lcd.print(" ");
   lcd.print(id);
@@ -99,20 +82,23 @@ void setup() {
   lcd.print(".");
   lcd.print(versionMinor);
 
+  //Start BLE Advertisement
+  RFduinoBLE.advertisementInterval = 675;
+  RFduinoBLE.deviceName = identityChars;
+  RFduinoBLE.advertisementData = idChars;
+  RFduinoBLE.txPowerLevel = +4;
+  RFduinoBLE.begin();
+
   AFMS.begin(faderMotorHertz);  // create with the default frequency 1.6KHz
   faderIntensity.setSpeedLimits(faderMotorSpeed);
+  faderIntensity.setAdsGain(GAIN_TWOTHIRDS);
+  faderIntensity.begin();
   faderTemperature.setSpeedLimits(faderMotorSpeed);
-
-  faderIntensityPots.setGain(GAIN_TWOTHIRDS);    // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  faderTemperaturePots.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  faderIntensityPots.begin();
-  faderTemperaturePots.begin();
+  faderTemperature.setAdsGain(GAIN_TWOTHIRDS);
+  faderTemperature.begin();
 
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
-
-  state = S_PID_TEST;
-  lcd.clear();
 }
 
 void loop() {
@@ -120,16 +106,22 @@ void loop() {
   double t = thisFrameMillis * 0.001 * 0.5;
   switch (state) {
     case S_SETUP :
+      delay(1000);
+      state = S_FADER_CALIBRATE;
+      break;
+    case S_FADER_CALIBRATE :
+      lcd.setCursor(0, 1);
+      lcd.print("Calibrating...");
+      faderTemperature.calibrate();
+      faderIntensity.calibrate();
       state = S_PID_TEST;
-      ;
       break;
     case S_PID_TEST :
       // FADER TEST
 
       //Intensity
 
-      faderIntensityPot0 = faderIntensityPots.readADC_SingleEnded(0);
-      faderIntensity.update( mapFloat(faderIntensityPot0, 20, 17100,  0.0, 1023.0) );
+      faderIntensity.update();
 
       if (fmod(t, 3.0) < 2.0) {
         faderIntensity.setSetpoint(
@@ -139,8 +131,7 @@ void loop() {
 
       //Temperature
 
-      faderTemperaturePot0 = faderTemperaturePots.readADC_SingleEnded(0);
-      faderTemperature.update( mapFloat(faderTemperaturePot0, 20, 17100,  0.0, 1023.0) );
+      faderTemperature.update();
 
       //t += 0.5;
 
@@ -153,11 +144,11 @@ void loop() {
       // Display
 
       lcd.setCursor(0, 0);
-      lcdPrintNumberPadded(faderIntensityPot0, 5, ' ');
+      lcdPrintNumberPadded(faderIntensity.getLastFaderAdsValue(), 5, ' ');
       lcdPrintNumberPadded(faderIntensity.getSetpoint(), 5, ' ');
       lcdPrintNumberPadded(faderIntensity.getSetpoint() - faderIntensity.getPos() , 5, ' ');
       lcd.setCursor(0, 1);
-      lcdPrintNumberPadded(faderTemperaturePot0, 5, ' ');
+      lcdPrintNumberPadded(faderTemperature.getLastFaderAdsValue(), 5, ' ');
       lcdPrintNumberPadded(faderTemperature.getSetpoint(), 5, ' ');
       lcdPrintNumberPadded(faderTemperature.getSetpoint() - faderTemperature.getPos() , 5, ' ');
       break;
