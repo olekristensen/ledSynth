@@ -13,8 +13,8 @@ const int versionMinor = 3;
 #include <LiquidTWI.h>               // Display
 #include <Adafruit_ADS1015.h>        // Analog Digital Converter
 #include <Adafruit_MotorShield.h>    // Motor Shield
-//#include <Adafruit_PWMServoDriver.h> // PWM
 #include <PID_v1.h>
+#include "Fader.h"
 
 
 // DISPLAY
@@ -25,28 +25,21 @@ LiquidTWI lcd(0);                     //0x20
 
 Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x61);
 
-double faderMotorSpeed = 156;
+const double faderMotorSpeed = 156;
+const int faderMotorHertz = 55;
+const double faderPidP = .75;
+const double faderPidI = 20;
+const double faderPidD = 0.0002;
 
-double pidP = .75;
-double pidI = 20;
-double pidD = 0.0002;
+const int faderPidSampleRate = 10;                  // Calling compute() every 10 ms.
 
-long pidTimeToAcquire = 0;                    // How long in millis to acquire new target.
-const int pidSampleRate = 10;                  // Calling compute() every ms.
+Fader faderIntensity(
+  AFMS.getMotor(1),
+  faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 
-Adafruit_DCMotor *intensityMotor = AFMS.getMotor(1);
-long millisLastFadeIntensity;
-double faderIntensitySetpoint = 0;
-double faderIntensityPos = 0;
-double faderIntensitySpeed = 0;
-PID pidIntensity(&faderIntensityPos, &faderIntensitySpeed, &faderIntensitySetpoint, pidP, pidI, pidD, DIRECT);
-
-Adafruit_DCMotor *temperatureMotor = AFMS.getMotor(2);
-long millisLastFadeTemperature;
-double faderTemperatureSetpoint = 0;
-double faderTemperaturePos = 0;
-double faderTemperatureSpeed = 0;
-PID pidTemperature(&faderTemperaturePos, &faderTemperatureSpeed, &faderTemperatureSetpoint, pidP, pidI, pidD, DIRECT);
+Fader faderTemperature(
+  AFMS.getMotor(2),
+  faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 
 // POTMETERS
 
@@ -106,18 +99,9 @@ void setup() {
   lcd.print(".");
   lcd.print(versionMinor);
 
-  AFMS.begin(55);  // create with the default frequency 1.6KHz
-
-  intensityMotor->setSpeed(225);
-  temperatureMotor->setSpeed(225);
-
-  pidTemperature.SetMode(AUTOMATIC);
-  pidTemperature.SetSampleTime(pidSampleRate);           // Sets the sample rate
-  pidTemperature.SetOutputLimits(0 - faderMotorSpeed, faderMotorSpeed);        // Set max speed for DC motors
-
-  pidIntensity.SetMode(AUTOMATIC);
-  pidIntensity.SetSampleTime(pidSampleRate);           // Sets the sample rate
-  pidIntensity.SetOutputLimits(0 - faderMotorSpeed, faderMotorSpeed);        // Set max speed for DC motors
+  AFMS.begin(faderMotorHertz);  // create with the default frequency 1.6KHz
+  faderIntensity.setSpeedLimits(faderMotorSpeed);
+  faderTemperature.setSpeedLimits(faderMotorSpeed);
 
   faderIntensityPots.setGain(GAIN_TWOTHIRDS);    // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
   faderTemperaturePots.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
@@ -145,49 +129,37 @@ void loop() {
       //Intensity
 
       faderIntensityPot0 = faderIntensityPots.readADC_SingleEnded(0);
-      faderIntensityPos = constrain(mapFloat(faderIntensityPot0, 20, 17100,  0.0, 1023.0), 0.0, 1023.0);
+      faderIntensity.update( mapFloat(faderIntensityPot0, 20, 17100,  0.0, 1023.0) );
 
-      if (pidIntensity.Compute()) {
-        intensityMotor->setSpeed(abs(faderIntensitySpeed));
-        if (faderIntensitySpeed < 0.0) {
-          intensityMotor->run(BACKWARD);
-        } else {
-          intensityMotor->run(FORWARD);
-        }
+      if (fmod(t, 3.0) < 2.0) {
+        faderIntensity.setSetpoint(
+          mapFloat(sin(sin(t * 2.0) * fmod(t, 3.0)), -1.0, 1.0, 24.0, 1000.0)
+        );
       }
-
-      if (fmod(t, 3.0) < 2.0)
-        faderIntensitySetpoint = mapFloat(sin(sin(t * 2.0) * fmod(t, 3.0)), -1.0, 1.0, 24.0, 1000.0);
 
       //Temperature
 
       faderTemperaturePot0 = faderTemperaturePots.readADC_SingleEnded(0);
-      faderTemperaturePos = constrain(mapFloat(faderTemperaturePot0, 20, 17100,  0.0, 1023.0), 0.0, 1023.0);
+      faderTemperature.update( mapFloat(faderTemperaturePot0, 20, 17100,  0.0, 1023.0) );
 
-      if (pidTemperature.Compute()) {
-        temperatureMotor->setSpeed(abs(faderTemperatureSpeed));
-        if (faderTemperatureSpeed < 0.0) {
-          temperatureMotor->run(BACKWARD);
-        } else {
-          temperatureMotor->run(FORWARD);
-        }
+      //t += 0.5;
+
+      if (fmod(t, 3.0) < 2.0) {
+        faderTemperature.setSetpoint(
+          mapFloat(sin(sin(t * 2.0) * fmod(t, 3.0)), -1.0, 1.0, 24.0, 1000.0)
+        );
       }
-
-      t += 0.5;
-
-      if (fmod(t, 3.0) < 2.0)
-        faderTemperatureSetpoint = mapFloat(sin(sin(t * 2.0) * fmod(t, 3.0)), -1.0, 1.0, 24.0, 1000.0);
 
       // Display
 
       lcd.setCursor(0, 0);
       lcdPrintNumberPadded(faderIntensityPot0, 5, ' ');
-      lcdPrintNumberPadded(faderIntensitySetpoint, 5, ' ');
-      lcdPrintNumberPadded(faderIntensitySetpoint - faderIntensityPos , 5, ' ');
-      lcd.setCursor(0, 1);      
+      lcdPrintNumberPadded(faderIntensity.getSetpoint(), 5, ' ');
+      lcdPrintNumberPadded(faderIntensity.getSetpoint() - faderIntensity.getPos() , 5, ' ');
+      lcd.setCursor(0, 1);
       lcdPrintNumberPadded(faderTemperaturePot0, 5, ' ');
-      lcdPrintNumberPadded(faderTemperatureSetpoint, 5, ' ');
-      lcdPrintNumberPadded(faderTemperatureSetpoint - faderTemperaturePos , 5, ' ');
+      lcdPrintNumberPadded(faderTemperature.getSetpoint(), 5, ' ');
+      lcdPrintNumberPadded(faderTemperature.getSetpoint() - faderTemperature.getPos() , 5, ' ');
       break;
     case S_RUNNING  :
       ;
