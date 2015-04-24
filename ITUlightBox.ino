@@ -1,3 +1,9 @@
+// TODO: Configuration struct with IDsa and Consts in EEPROM
+// TODO: Binary protocol for bluetooth
+// TODO: Range pots
+// TODO: Rotary encoder
+// TODO: Light sensor
+
 // IDENTITY
 
 const int id = 2;
