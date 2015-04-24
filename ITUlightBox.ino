@@ -1,33 +1,39 @@
-// TODO: Configuration struct with IDsa and Consts in EEPROM
 // TODO: Binary protocol for bluetooth
 // TODO: Range pots
 // TODO: Rotary encoder
 // TODO: Light sensor
 
-// IDENTITY
-
-const int id = 2;
-const char *idChars = "2";
-const String identityString = "LEDSYNTH";
-const char *identityChars = "LEDSYNTH";
-
-const int versionMajor = 0;
-const int versionMinor = 3;
-
 #include <Wire.h>
 #include <LiquidTWI.h>               // Display
 #include <Adafruit_ADS1015.h>        // Analog Digital Converter
 #include <Adafruit_MotorShield.h>    // Motor Shield
+#include <Adafruit_TCS34725.h>       // Light Sensor
 #include <PID_v1.h>
 #include <RFduinoBLE.h>
 #include <QueueList.h>
 #include <String.h>
+#include "tcs34725.h"
 #include "Fader.h"
+#include "flash.h"
 
+// DEBUG
+
+#define DEBUG_V 1
+#include <DebugUtils.h>
+
+// IDENTITY
+
+const String identityString = "LEDSYNTH";
+const int versionMajor = 0;
+const int versionMinor = 4;
+
+// QUAD ENCODER
+const int quadPinA = 3;
+const int quadPinB = 4;
 
 // DISPLAY
 
-LiquidTWI lcd(0);                     //0x20
+LiquidTWI lcd(0); // I2C 0x20
 
 byte lcdCharBluetooth[8] = {0x4, 0x16, 0xd, 0x6, 0xd, 0x16, 0x4};
 byte lcdCharFat1[8] = {0x2, 0x6, 0xe, 0x6, 0x6, 0x6, 0x6};
@@ -40,32 +46,37 @@ byte lcdCharFat7[8] = {0x1f, 0x3, 0x6, 0xc, 0xc, 0xc, 0xc};
 byte lcdCharFat8[8] = {0xe, 0x1b, 0x1b, 0xe, 0x1b, 0x1b, 0xe};
 byte lcdCharFat9[8] = {0xe, 0x1b, 0x1b, 0xf, 0x3, 0x1b, 0xe};
 byte lcdCharFat0[8] = {0xe, 0x1b, 0x1b, 0x1b, 0x1b, 0x1b, 0xe};
-
 byte * lcdCharNumbers[10] = {lcdCharFat0, lcdCharFat1, lcdCharFat2, lcdCharFat3, lcdCharFat4, lcdCharFat5, lcdCharFat6, lcdCharFat7, lcdCharFat8, lcdCharFat9 };
+
 
 // FADERS
 
-Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x61);
+Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x61); // I2C 0x61
 
-const double faderMotorSpeed = 200;//156;
+const double faderMotorSpeed = 200;
 const int faderMotorHertz = 110 / 2;
 const double faderPidP = .75;
 const double faderPidI = 20;
 const double faderPidD = 0.002;
 
-const int faderPidSampleRate = 10;                  // Calling compute() every 10 ms.
+const int faderPidSampleRate = 10; // Calling compute() every >10 ms.
 
-Adafruit_ADS1115 faderIntensityPots(0x49);/*16-bit*/ //0x49
+Adafruit_ADS1115 faderIntensityPots(0x49);/*16-bit*/ // I2C 0x49
 Fader faderIntensity(
   AFMS.getMotor(1),
   &faderIntensityPots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 
-Adafruit_ADS1115 faderTemperaturePots(0x4A);/*16-bit*/ //0x4A
+Adafruit_ADS1115 faderTemperaturePots(0x4A);/*16-bit*/ // I2C 0x4A
 Fader faderTemperature(
   AFMS.getMotor(2),
   &faderTemperaturePots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
+
+
+// LIGHT SENSOR
+
+tcs34725 lightSensor; // I2C 0x29
 
 
 // PWM
@@ -74,12 +85,13 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 
 // BLUETOOTH
+
 enum bleInputStates { BIS_START, BIS_COMMAND, BIS_DATA, BIS_END };
 int bleInputState = BIS_START;
 char bleInputCommandBuf;
 String bleInputHexstringBuf;
 
-struct bleCommand{
+struct bleCommand {
   char command;
   String hexstring;
 };
@@ -88,37 +100,74 @@ QueueList <bleCommand> bleCommandQueue;
 
 bool bleAdvertising = false;
 
-// CONTROL
+
+// STATE
 
 enum State { S_SETUP, S_FADER_CALIBRATE, S_PID_TEST, S_STANDALONE_SETUP, S_STANDALONE_LOOP, S_CONNECTED_SETUP, S_CONNECTED_LOOP };
 int state = S_SETUP;
+
+
+// TIME
+
 long millisLastFrame = 0;
 long frameCount = 0;
 
 void setup() {
 
-  Serial.begin(9600); // set up Serial library at 9600 bps
   Wire.speed = 400;
+
+  if (DEBUG_V == 1) {
+    Serial.begin(9600); // set up Serial library at 9600 bps
+  }
+
+  // Quad Enoder
+  pinMode(quadPinA, INPUT_PULLUP);
+  pinMode(quadPinB, INPUT_PULLUP);
+
+  lightSensor.begin();
+
+  lcd.begin(16, 2);
+
+  if (!loadConf()) {
+    eraseConf();
+    DEBUG_PRINT("CONF: Not loaded, defaulting");
+    struct flash_conf_t defaultConf = { 0, CONF_STATE_DEFAULT };
+    if (!writeConf(defaultConf)) {
+      DEBUG_PRINT("CONF: Could not save defaults");
+      conf = new struct flash_conf_t;
+      conf->id = 0;
+      conf->state = CONF_STATE_ERROR;
+    } else {
+      loadConf();
+      if (DEBUG_V == 1) {
+        DEBUG_PRINT("CONF: Saved defaults");
+        debug_conf( conf );
+      }
+    }
+  }
 
   //Print unit info on serial
   Serial.println(identityString);
   Serial.print("id:\t");
-  Serial.println(id);
+  Serial.println(conf->id);
   Serial.print("ver.\t");
   Serial.print(versionMajor);
   Serial.print(".");
-  Serial.print(versionMinor);
-
-  lcd.begin(16, 2);
+  Serial.println(versionMinor);
 
   lcd.createChar(0, lcdCharBluetooth);   //Bluetooth Icon
-  lcd.createChar(1, lcdCharNumbers[id]); //Fat indentity number
+  lcd.createChar(1, lcdCharNumbers[conf->id]); //Fat indentity number
 
   lcd.clear();
   //Print unit info on display
   lcd.write(byte(1));
   lcd.print(" ");
-  lcd.print(identityString);
+  if (conf->state == CONF_STATE_OK)
+    lcd.print(identityString);
+  else if (conf->state == CONF_STATE_DEFAULT)
+    lcd.print("unconfigured");
+  else if (conf->state == CONF_STATE_ERROR)
+    lcd.print("conf error");
   lcd.setCursor(2, 1);
   lcd.print("v.");
   lcd.print(versionMajor);
@@ -127,8 +176,8 @@ void setup() {
 
   //Start BLE Advertisement
   RFduinoBLE.advertisementInterval = 200;
-  RFduinoBLE.deviceName = identityChars;
-  RFduinoBLE.advertisementData = idChars;
+  RFduinoBLE.deviceName = identityString.cstr();
+  RFduinoBLE.advertisementData = conf->id + "";
   RFduinoBLE.txPowerLevel = +4;
 
   AFMS.begin(faderMotorHertz);  // create with the default frequency 1.6KHz
@@ -222,6 +271,7 @@ void loop() {
       lcd.print("standalone");
       faderIntensity.setManual();
       faderTemperature.setManual();
+      quadEnable();
       state = S_STANDALONE_LOOP;
       break;
     case S_STANDALONE_LOOP  :
@@ -273,11 +323,11 @@ void loop() {
       state = S_CONNECTED_LOOP;
       break;
     case S_CONNECTED_LOOP  :
-      
-      while(!bleCommandQueue.isEmpty()){
+
+      while (!bleCommandQueue.isEmpty()) {
         processCommand(bleCommandQueue.pop());
       }
-      
+
       faderIntensity.update();
       faderTemperature.update();
       // Display
@@ -303,25 +353,25 @@ void loop() {
 // BLUETOOTH
 
 
-void queueCommand (char command, String hexstring){
-  
-  while(bleCommandQueue.count() > 20){
-    if(bleCommandQueue.peek().command == command)
+void queueCommand (char command, String hexstring) {
+
+  while (bleCommandQueue.count() > 20) {
+    if (bleCommandQueue.peek().command == command)
       bleCommandQueue.pop();
   }
   bleCommand cmd = {command, hexstring};
   bleCommandQueue.push(cmd);
 }
 
-void processCommand (struct bleCommand cmd){
-    switch (cmd.command) {
-        case 'I':                                          
-        faderIntensity.setSetpointNormalised(cmd.hexstring.toInt()/65535.0);
-        break;
-        case 'T':                                          
-        faderTemperature.setSetpointNormalised(cmd.hexstring.toInt()/65535.0);
-        break;
-    }
+void processCommand (struct bleCommand cmd) {
+  switch (cmd.command) {
+    case 'I':
+      faderIntensity.setSetpointNormalised(cmd.hexstring.toInt() / 65535.0);
+      break;
+    case 'T':
+      faderTemperature.setSetpointNormalised(cmd.hexstring.toInt() / 65535.0);
+      break;
+  }
 }
 
 
@@ -381,8 +431,8 @@ void bleInputStateMachine(char data) {
       if (data == 3)                                   // 0x03=valid terminator
       {
         queueCommand(bleInputCommandBuf, bleInputHexstringBuf);            // We have a valid command message - process it
-            while (! RFduinoBLE.send(bleInputCommandBuf))
-      ;  // all tx buffers in use (can't send - try again later)
+        while (! RFduinoBLE.send(bleInputCommandBuf))
+          ;  // all tx buffers in use (can't send - try again later)
         bleInputState = BIS_START;
       } else if (data == 1) {                          // 0x01= start of new message, back to state 2
         bleInputState = BIS_COMMAND;
@@ -399,21 +449,6 @@ void setDisplayColorRGB(double r, double g, double b) {
   pwm.setPWM(2, 0, 0xFFF - round( 0xFFF * b * 0.7));
 }
 
-// UTILS
-
-int numDigits(int number)
-{
-  int digits = 0;
-  if (number < 0) {
-    digits = 1;
-  }
-  do {
-    number /= 10;
-    digits++;
-  } while (number != 0);
-  return digits;
-}
-
 void lcdPrintNumberPadded(int number, int len, char padding) {
   for (int i = 0; i < len - numDigits(number); i++) {
     lcd.print(padding);
@@ -421,8 +456,64 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
   lcd.print(number);
 }
 
-float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
+int quadPinCallback(uint32_t pin) {
+  DEBUG_PRINT(digitalRead(quadPinA));
+  DEBUG_PRINT(digitalRead(quadPinB));
+  return 0;
+}
+
+void GPIOTE_IRQHandler(void)
 {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+  // Event causing the interrupt must be cleared
+  if ((NRF_GPIOTE->EVENTS_IN[0] != 0) )// && (NRF_GPIOTE->INTENSET & GPIOTE_INTENSET_IN0_Msk))
+  {
+    NRF_GPIOTE->EVENTS_IN[0] = 0;
+    Serial.print("A:");
+    Serial.println(digitalRead(quadPinA));
+  }
+  if ((NRF_GPIOTE->EVENTS_IN[1] != 0) )// && (NRF_GPIOTE->INTENSET & GPIOTE_INTENSET_IN1_Msk))
+  {
+    NRF_GPIOTE->EVENTS_IN[1] = 0;
+    Serial.print("B:");
+    Serial.println(digitalRead(quadPinB));
+  }
+}
+
+
+void quadEnable() {
+
+  NVIC_EnableIRQ(GPIOTE_IRQn);
+
+  NRF_GPIOTE->CONFIG[0] =  (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos)
+                           | (quadPinA << GPIOTE_CONFIG_PSEL_Pos)
+                           | (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos);
+  NRF_GPIOTE->INTENSET  = GPIOTE_INTENSET_IN0_Set << GPIOTE_INTENSET_IN0_Pos;
+
+  NRF_GPIOTE->CONFIG[1] =  (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos)
+                           | (quadPinB << GPIOTE_CONFIG_PSEL_Pos)
+                           | (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos);
+  NRF_GPIOTE->INTENSET  = GPIOTE_INTENSET_IN1_Set << GPIOTE_INTENSET_IN1_Pos;
+
+  __NOP();
+  __NOP();
+  __NOP();
+
+  /* Clear the event that appears in some cases */
+  NRF_GPIOTE->EVENTS_IN[0] = 0;
+  NRF_GPIOTE->EVENTS_IN[1] = 0;
+
+  NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN0_Enabled << GPIOTE_INTENSET_IN0_Pos;
+  NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Enabled << GPIOTE_INTENSET_IN1_Pos;
+
+  /*
+  RFduino_pinWakeCallback(quadPinA, HIGH, quadPinCallback);
+  RFduino_pinWakeCallback(quadPinB, HIGH, quadPinCallback);
+  */
+}
+
+void quadDisable() {
+  /*  RFduino_pinWakeCallback(quadPinA, DISABLE, quadPinCallback);
+      RFduino_pinWakeCallback(quadPinB, DISABLE, quadPinCallback);*/
+
 }
 

@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include "utils.h"
 
 class Fader {
   public:
@@ -126,8 +127,6 @@ class Fader {
       long lastTestMillis = 0;
       const int millisEndWindow = 150;
       const int minOutput = _outputLimit / 6;
-
-      Serial.println("CALIBRATING");
 
       // find high ads value
       _motor->run(FORWARD);
