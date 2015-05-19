@@ -1,6 +1,6 @@
+// TODO: Rotary encoder should use QENC nrf function
 // TODO: Binary protocol for bluetooth
 // TODO: Range pots
-// TODO: Rotary encoder
 // TODO: Light sensor
 
 #include <Wire.h>
@@ -15,6 +15,7 @@
 #include "tcs34725.h"
 #include "Fader.h"
 #include "flash.h"
+#include "qdec.h"
 
 // DEBUG
 
@@ -28,8 +29,12 @@ const int versionMajor = 0;
 const int versionMinor = 4;
 
 // QUAD ENCODER
-const int quadPinA = 3;
-const int quadPinB = 4;
+const int quadButtonPin = 2;
+const int quadPhasePinA = 3;
+const int quadPhasePinB = 4;
+const int quadPhasesPerTick = 4;
+int quadPos = 0;
+qdec quad(quadPhasePinA,quadPhasePinB);
 
 // DISPLAY
 
@@ -103,9 +108,8 @@ bool bleAdvertising = false;
 
 // STATE
 
-enum State { S_SETUP, S_FADER_CALIBRATE, S_PID_TEST, S_STANDALONE_SETUP, S_STANDALONE_LOOP, S_CONNECTED_SETUP, S_CONNECTED_LOOP };
+enum State { S_SETUP, S_FADER_CALIBRATE, S_PID_TEST, S_QDEC_TEST, S_STANDALONE_SETUP, S_STANDALONE_LOOP, S_CONNECTED_SETUP, S_CONNECTED_LOOP };
 int state = S_SETUP;
-
 
 // TIME
 
@@ -119,10 +123,6 @@ void setup() {
   if (DEBUG_V == 1) {
     Serial.begin(9600); // set up Serial library at 9600 bps
   }
-
-  // Quad Enoder
-  pinMode(quadPinA, INPUT_PULLUP);
-  pinMode(quadPinB, INPUT_PULLUP);
 
   lightSensor.begin();
 
@@ -190,6 +190,8 @@ void setup() {
 
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
+  
+  pinMode(quadButtonPin, INPUT_PULLUP);
 }
 
 void loop() {
@@ -197,6 +199,7 @@ void loop() {
   double t = thisFrameMillis * 0.001 * 0.5;
   int fadeSteps = 500;
   switch (state) {
+
     case S_SETUP :
       for (int i = 0; i < fadeSteps; i++) {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
@@ -207,6 +210,7 @@ void loop() {
       delay(250);
       state = S_FADER_CALIBRATE;
       break;
+
     case S_FADER_CALIBRATE :
       state = S_STANDALONE_SETUP;
       lcd.clear();
@@ -218,6 +222,21 @@ void loop() {
       RFduinoBLE.begin();
       lcd.clear();
       break;
+
+    case S_QDEC_TEST :
+
+      quad.enable();
+
+      lcd.setCursor(2, 0);
+      lcd.print("Quad Encoder");
+      lcd.setCursor(2, 1);
+      quadPos += quad.readDelta();
+      lcdPrintNumberPadded(quadPos/quadPhasesPerTick, 12, ' ');
+      if(digitalRead(quadButtonPin) == LOW){
+        quadPos = 0;
+      }     
+      break;
+
     case S_PID_TEST :
       // FADER TEST
 
@@ -251,6 +270,7 @@ void loop() {
       lcdPrintNumberPadded(faderTemperature.getSetpoint(), 5, ' ');
       lcdPrintNumberPadded(faderTemperature.getSetpoint() - faderTemperature.getPos() , 5, ' ');
       break;
+
     case S_STANDALONE_SETUP :
       lcd.clear();
       lcd.setCursor(0, 0);
@@ -271,9 +291,9 @@ void loop() {
       lcd.print("standalone");
       faderIntensity.setManual();
       faderTemperature.setManual();
-      quadEnable();
       state = S_STANDALONE_LOOP;
       break;
+
     case S_STANDALONE_LOOP  :
       faderIntensity.update();
       faderTemperature.update();
@@ -290,12 +310,14 @@ void loop() {
       lcd.print("%");
       lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
       lcd.print("%");
+
       /*
       // millis per frame
       lcd.setCursor(0, 1);
       lcdPrintNumberPadded(thisFrameMillis - millisLastFrame, 2, ' ');
       */
       break;
+
     case S_CONNECTED_SETUP :
       lcd.clear();
       lcd.setCursor(0, 0);
@@ -456,64 +478,14 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
   lcd.print(number);
 }
 
-int quadPinCallback(uint32_t pin) {
-  DEBUG_PRINT(digitalRead(quadPinA));
-  DEBUG_PRINT(digitalRead(quadPinB));
-  return 0;
+int quadRead(){
+  
 }
 
-void GPIOTE_IRQHandler(void)
-{
-  // Event causing the interrupt must be cleared
-  if ((NRF_GPIOTE->EVENTS_IN[0] != 0) )// && (NRF_GPIOTE->INTENSET & GPIOTE_INTENSET_IN0_Msk))
-  {
-    NRF_GPIOTE->EVENTS_IN[0] = 0;
-    Serial.print("A:");
-    Serial.println(digitalRead(quadPinA));
-  }
-  if ((NRF_GPIOTE->EVENTS_IN[1] != 0) )// && (NRF_GPIOTE->INTENSET & GPIOTE_INTENSET_IN1_Msk))
-  {
-    NRF_GPIOTE->EVENTS_IN[1] = 0;
-    Serial.print("B:");
-    Serial.println(digitalRead(quadPinB));
-  }
+void quadEnable(){
+  
 }
 
-
-void quadEnable() {
-
-  NVIC_EnableIRQ(GPIOTE_IRQn);
-
-  NRF_GPIOTE->CONFIG[0] =  (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos)
-                           | (quadPinA << GPIOTE_CONFIG_PSEL_Pos)
-                           | (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos);
-  NRF_GPIOTE->INTENSET  = GPIOTE_INTENSET_IN0_Set << GPIOTE_INTENSET_IN0_Pos;
-
-  NRF_GPIOTE->CONFIG[1] =  (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos)
-                           | (quadPinB << GPIOTE_CONFIG_PSEL_Pos)
-                           | (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos);
-  NRF_GPIOTE->INTENSET  = GPIOTE_INTENSET_IN1_Set << GPIOTE_INTENSET_IN1_Pos;
-
-  __NOP();
-  __NOP();
-  __NOP();
-
-  /* Clear the event that appears in some cases */
-  NRF_GPIOTE->EVENTS_IN[0] = 0;
-  NRF_GPIOTE->EVENTS_IN[1] = 0;
-
-  NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN0_Enabled << GPIOTE_INTENSET_IN0_Pos;
-  NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Enabled << GPIOTE_INTENSET_IN1_Pos;
-
-  /*
-  RFduino_pinWakeCallback(quadPinA, HIGH, quadPinCallback);
-  RFduino_pinWakeCallback(quadPinB, HIGH, quadPinCallback);
-  */
-}
-
-void quadDisable() {
-  /*  RFduino_pinWakeCallback(quadPinA, DISABLE, quadPinCallback);
-      RFduino_pinWakeCallback(quadPinB, DISABLE, quadPinCallback);*/
+void quadDisable(){
 
 }
-
