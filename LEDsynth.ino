@@ -1,4 +1,24 @@
-// TODO: Rotary encoder should use QENC nrf function
+/*  LEDsynth - a dmx controller for control praradigm experiments with LED fixtures.
+    Copyright (C) 2015  Ole Kristensen
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    ole@kristensen.name
+    olek@itu.dk
+*/
+
+// TODO: Setup menu
 // TODO: Binary protocol for bluetooth
 // TODO: Range pots
 // TODO: Light sensor
@@ -22,19 +42,30 @@
 #define DEBUG_V 1
 #include <DebugUtils.h>
 
+
 // IDENTITY
 
 const String identityString = "LEDSYNTH";
 const int versionMajor = 0;
 const int versionMinor = 4;
 
+
 // QUAD ENCODER
+
 const int quadButtonPin = 2;
 const int quadPhasePinA = 3;
 const int quadPhasePinB = 4;
 const int quadPhasesPerTick = 4;
+static volatile int woke;
 int quadPos = 0;
-qdec quad(quadPhasePinA,quadPhasePinB);
+qdec quad(quadPhasePinA, quadPhasePinB);
+
+int quadButtonCallback(uint32_t ulPin)
+{
+  woke++;
+  return 0;  // don't exit RFduino_ULPDelay
+}
+
 
 // DISPLAY
 
@@ -78,6 +109,10 @@ Fader faderTemperature(
   &faderTemperaturePots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 
+// MENU
+
+
+
 
 // LIGHT SENSOR
 
@@ -108,8 +143,18 @@ bool bleAdvertising = false;
 
 // STATE
 
-enum State { S_SETUP, S_FADER_CALIBRATE, S_PID_TEST, S_QDEC_TEST, S_STANDALONE_SETUP, S_STANDALONE_LOOP, S_CONNECTED_SETUP, S_CONNECTED_LOOP };
-int state = S_SETUP;
+enum State { S_BOOT,
+             S_MENU,
+             S_FADER_CALIBRATE,
+             S_PID_TEST,
+             S_QDEC_TEST,
+             S_BLE_SETUP,
+             S_STANDALONE_SETUP,
+             S_STANDALONE_LOOP,
+             S_CONNECTED_SETUP,
+             S_CONNECTED_LOOP
+           };
+int state = S_BOOT;
 
 // TIME
 
@@ -145,6 +190,9 @@ void setup() {
       }
     }
   }
+
+  pinMode(quadButtonPin, INPUT_PULLUP);
+  RFduino_pinWakeCallback(2, LOW, quadButtonCallback);
 
   //Print unit info on serial
   Serial.println(identityString);
@@ -190,8 +238,7 @@ void setup() {
 
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
-  
-  pinMode(quadButtonPin, INPUT_PULLUP);
+
 }
 
 void loop() {
@@ -200,7 +247,7 @@ void loop() {
   int fadeSteps = 500;
   switch (state) {
 
-    case S_SETUP :
+    case S_BOOT :
       for (int i = 0; i < fadeSteps; i++) {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
         // fade up from warm to cold
@@ -212,15 +259,24 @@ void loop() {
       break;
 
     case S_FADER_CALIBRATE :
-      state = S_STANDALONE_SETUP;
+      state = S_BLE_SETUP;
       lcd.clear();
       lcd.write(byte(1));
       lcd.print(" ");
       lcd.print("calibrating...");
       faderTemperature.calibrate();
       faderIntensity.calibrate();
-      RFduinoBLE.begin();
       lcd.clear();
+      if (digitalRead(quadButtonPin) == LOW) {
+        state = S_MENU;
+      }
+      break;
+
+    case S_MENU :
+      lcd.clear();
+      lcd.write(byte(1));
+      
+
       break;
 
     case S_QDEC_TEST :
@@ -231,10 +287,11 @@ void loop() {
       lcd.print("Quad Encoder");
       lcd.setCursor(2, 1);
       quadPos += quad.readDelta();
-      lcdPrintNumberPadded(quadPos/quadPhasesPerTick, 12, ' ');
-      if(digitalRead(quadButtonPin) == LOW){
+      lcdPrintNumberPadded(quadPos / quadPhasesPerTick, 12, ' ');
+      if (digitalRead(quadButtonPin) == LOW && quadPos != 0) {
         quadPos = 0;
-      }     
+        state = S_BLE_SETUP;
+      }
       break;
 
     case S_PID_TEST :
@@ -269,6 +326,12 @@ void loop() {
       lcdPrintNumberPadded(faderTemperature.getLastFaderAdsValue(), 5, ' ');
       lcdPrintNumberPadded(faderTemperature.getSetpoint(), 5, ' ');
       lcdPrintNumberPadded(faderTemperature.getSetpoint() - faderTemperature.getPos() , 5, ' ');
+      break;
+
+
+    case S_BLE_SETUP :
+      state = S_STANDALONE_SETUP;
+      RFduinoBLE.begin();
       break;
 
     case S_STANDALONE_SETUP :
@@ -344,6 +407,7 @@ void loop() {
       faderTemperature.setAutomatic();
       state = S_CONNECTED_LOOP;
       break;
+
     case S_CONNECTED_LOOP  :
 
       while (!bleCommandQueue.isEmpty()) {
@@ -478,14 +542,14 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
   lcd.print(number);
 }
 
-int quadRead(){
-  
+int quadRead() {
+
 }
 
-void quadEnable(){
-  
+void quadEnable() {
+
 }
 
-void quadDisable(){
+void quadDisable() {
 
 }

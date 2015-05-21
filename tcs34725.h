@@ -5,7 +5,7 @@
 // TAOS and a basic autorange mechanism.
 //
 // Written by ductsoup, public domain
-//
+// Modified by ole kristensen
 
 // RGB Color Sensor with IR filter and White LED - TCS34725
 // I2C 7-bit address 0x29, 8-bit address 0x52
