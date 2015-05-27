@@ -151,6 +151,7 @@ class Fader {
       const int minOutput = _outputLimit / 6;
 
       // find high ads value
+      _motor->setSpeed(_outputLimit);
       _motor->run(FORWARD);
       lastTestMillis = millis();
       while (millis() - lastTestMillis < millisEndWindow) {

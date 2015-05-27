@@ -1,4 +1,4 @@
-/*  
+/*
     This file is part of LEDsynth
     LEDsynth - a dmx controller for control praradigm experiments with LED fixtures.
     Copyright (C) 2015  Ole Kristensen
@@ -139,6 +139,7 @@ struct bleCommand {
 };
 
 QueueList <bleCommand> bleCommandQueue;
+long millisLastCommand = 0;
 
 bool bleAdvertising = false;
 
@@ -277,7 +278,7 @@ void loop() {
     case S_MENU :
       lcd.clear();
       lcd.write(byte(1));
-      
+
 
       break;
 
@@ -413,12 +414,30 @@ void loop() {
     case S_CONNECTED_LOOP  :
 
       while (!bleCommandQueue.isEmpty()) {
+        millisLastCommand = millis();
+        /* DEBUG
+        lcd.setCursor(0, 0);
+        lcd.write(byte(1)); // fat id number
+        lcd.print(" ");
+        lcd.print(bleCommandQueue.count());
+        lcd.print(" ");
+        lcd.print(bleCommandQueue.peek().command);
+        lcd.print(":");
+        lcd.print(bleCommandQueue.peek().hexstring);
+        */
         processCommand(bleCommandQueue.pop());
       }
 
       faderIntensity.update();
       faderTemperature.update();
       // Display
+      lcd.setCursor(15, 0);
+      if (thisFrameMillis > millisLastCommand + 50) {
+        lcd.write(byte(0));
+      } else {
+        lcd.print(" ");
+      }
+
       lcd.setCursor(0, 1);
       lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 5, ' ');
       lcd.print("%");
@@ -443,7 +462,7 @@ void loop() {
 
 void queueCommand (char command, String hexstring) {
 
-  while (bleCommandQueue.count() > 20) {
+  while (bleCommandQueue.count() > 10) {
     if (bleCommandQueue.peek().command == command)
       bleCommandQueue.pop();
   }
@@ -519,7 +538,7 @@ void bleInputStateMachine(char data) {
       if (data == 3)                                   // 0x03=valid terminator
       {
         queueCommand(bleInputCommandBuf, bleInputHexstringBuf);            // We have a valid command message - process it
-        while (! RFduinoBLE.send(bleInputCommandBuf))
+        //while (! RFduinoBLE.send(bleInputCommandBuf))
           ;  // all tx buffers in use (can't send - try again later)
         bleInputState = BIS_START;
       } else if (data == 1) {                          // 0x01= start of new message, back to state 2
