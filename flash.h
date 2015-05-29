@@ -1,4 +1,4 @@
-/*  
+/*
     This file is part of LEDsynth
     LEDsynth - a dmx controller for control praradigm experiments with LED fixtures.
     Copyright (C) 2015  Ole Kristensen
@@ -23,7 +23,7 @@
 #include "Arduino.h"
 
 // select a flash page that isn't in use (see Memory.h for more info)
-#define  CONF_FLASH_PAGE  251
+#define  CONF_FLASH_PAGE  250
 
 #define CONF_STATE_OK 'l'
 #define CONF_STATE_DEFAULT 'd'
@@ -35,7 +35,7 @@ struct flash_conf_t
   char state;
 };
 
-flash_conf_t *conf;
+static flash_conf_t *conf;
 
 void debug_conf( struct flash_conf_t *p )
 {
@@ -55,9 +55,8 @@ boolean loadConf() {
   }
 }
 
-boolean writeConf(struct flash_conf_t value) {
-  conf = (flash_conf_t*)ADDRESS_OF_PAGE(CONF_FLASH_PAGE);
-  int rc = flashWriteBlock(conf, &value, sizeof(value));
+boolean eraseConf() {
+  int rc = flashPageErase(CONF_FLASH_PAGE);
   if (rc == 0)
     return true;
   else if (rc == 1)
@@ -67,14 +66,18 @@ boolean writeConf(struct flash_conf_t value) {
   return false;
 }
 
-boolean eraseConf() {
-  conf = (flash_conf_t*)ADDRESS_OF_PAGE(CONF_FLASH_PAGE);
-  int rc = flashPageErase(PAGE_FROM_ADDRESS(conf));
-  if (rc == 0)
-    return true;
-  else if (rc == 1)
-    Serial.println("Error - the flash page is reserved");
-  else if (rc == 2)
-    Serial.println("Error - the flash page is used by the sketch");
-  return false;
+boolean writeConf(struct flash_conf_t value) {
+  if (eraseConf()) {
+    conf = (flash_conf_t*)ADDRESS_OF_PAGE(CONF_FLASH_PAGE);
+    int rc = flashWriteBlock(conf, &value, sizeof(value));
+    debug_conf(conf);
+    if (rc == 0)
+      return true;
+    else if (rc == 1)
+      Serial.println("Error - the flash page is reserved");
+    else if (rc == 2)
+      Serial.println("Error - the flash page is used by the sketch");
+    return false;
+  }
 }
+

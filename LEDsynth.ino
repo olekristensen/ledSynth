@@ -177,7 +177,6 @@ void setup() {
   lcd.begin(16, 2);
 
   if (!loadConf()) {
-    eraseConf();
     DEBUG_PRINT("CONF: Not loaded, defaulting");
     struct flash_conf_t defaultConf = { 0, CONF_STATE_DEFAULT };
     if (!writeConf(defaultConf)) {
@@ -197,17 +196,19 @@ void setup() {
   pinMode(quadButtonPin, INPUT_PULLUP);
   RFduino_pinWakeCallback(2, LOW, quadButtonCallback);
 
-  //Print unit info on serial
-  Serial.println(identityString);
-  Serial.print("id:\t");
-  Serial.println(conf->id);
-  Serial.print("ver.\t");
-  Serial.print(versionMajor);
-  Serial.print(".");
-  Serial.println(versionMinor);
+  if (DEBUG_V == 1) {
+    //Print unit info on serial
+    Serial.println(identityString);
+    Serial.print("id:\t");
+    Serial.println(conf->id);
+    Serial.print("ver.\t");
+    Serial.print(versionMajor);
+    Serial.print(".");
+    Serial.println(versionMinor);
+  }
 
   lcd.createChar(0, lcdCharBluetooth);   //Bluetooth Icon
-  lcd.createChar(1, lcdCharNumbers[conf->id]); //Fat indentity number
+  lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
 
   lcd.clear();
   //Print unit info on display
@@ -408,6 +409,7 @@ void loop() {
       lcd.write(byte(0)); // bluetooth icon
       faderIntensity.setAutomatic();
       faderTemperature.setAutomatic();
+      sendID();
       state = S_CONNECTED_LOOP;
       break;
 
@@ -424,7 +426,7 @@ void loop() {
         lcd.print(bleCommandQueue.peek().command);
         lcd.print(":");
         lcd.print(bleCommandQueue.peek().hexstring);
-        */
+        //*/
         processCommand(bleCommandQueue.pop());
       }
 
@@ -438,16 +440,16 @@ void loop() {
         lcd.print(" ");
       }
 
-      lcd.setCursor(0, 1);
-      lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 5, ' ');
+      lcd.setCursor(2, 1);
+      lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 3, ' ');
       lcd.print("%");
       lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
       lcd.print("%");
-      /*
+
       // millis per frame
       lcd.setCursor(0, 1);
       lcdPrintNumberPadded(thisFrameMillis - millisLastFrame, 2, ' ');
-      */
+
       break;
 
   }
@@ -472,6 +474,9 @@ void queueCommand (char command, String hexstring) {
 
 void processCommand (struct bleCommand cmd) {
   switch (cmd.command) {
+    case 'i':
+      setID(cmd.hexstring.toInt());
+      break;
     case 'I':
       faderIntensity.setSetpointNormalised(cmd.hexstring.toInt() / 65535.0);
       break;
@@ -481,6 +486,18 @@ void processCommand (struct bleCommand cmd) {
   }
 }
 
+void sendCommand(struct bleCommand cmd) {
+  String cmdString = "";
+  cmdString += 0x01;
+  cmdString += cmd.command;
+  cmdString += cmd.hexstring;
+  cmdString += 0x03;
+  char cmdBuf[cmdString.length()+1];
+  cmdString.toCharArray(cmdBuf, cmdString.length()+1);
+  DEBUG_PRINT(cmdBuf);
+  while (! RFduinoBLE.send(cmdBuf, cmdString.length()+1))
+      DEBUG_PRINT("waiting");  // all tx buffers in use (can't send - try again later)
+}
 
 extern "C" {
 
@@ -514,7 +531,7 @@ void bleInputStateMachine(char data) {
       }
       break;
     case BIS_COMMAND:                                           // wait for command
-      if (data == 'I' || data == 'T' ) { // If we received a valid command
+      if (data == 'I' || data == 'T' || data == 'i' ) { // If we received a valid command
         bleInputCommandBuf = data;                             // store it
         bleInputHexstringBuf = "";                             // prepare to receive a hex string
         bleInputState = BIS_DATA;
@@ -539,7 +556,7 @@ void bleInputStateMachine(char data) {
       {
         queueCommand(bleInputCommandBuf, bleInputHexstringBuf);            // We have a valid command message - process it
         //while (! RFduinoBLE.send(bleInputCommandBuf))
-          ;  // all tx buffers in use (can't send - try again later)
+        ;  // all tx buffers in use (can't send - try again later)
         bleInputState = BIS_START;
       } else if (data == 1) {                          // 0x01= start of new message, back to state 2
         bleInputState = BIS_COMMAND;
@@ -563,14 +580,27 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
   lcd.print(number);
 }
 
-int quadRead() {
-
+void setID(int id) {
+  struct flash_conf_t newConf = { id, CONF_STATE_OK };
+  while (!RFduinoBLE.radioActive) {} //wait until the radio is active, wastes time, but ensures we will get the most usage of non active cpu time
+  delay(6);
+  if (!writeConf(newConf)) {
+    DEBUG_PRINT("CONF: Could not save new conf");
+    conf = new struct flash_conf_t;
+    conf->id = 0;
+    conf->state = CONF_STATE_ERROR;
+  } else {
+    if (DEBUG_V == 1) {
+      DEBUG_PRINT("CONF: Saved new id");
+      debug_conf( conf );
+    }
+    lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
+  }
 }
 
-void quadEnable() {
-
-}
-
-void quadDisable() {
-
+void sendID() {
+  String hexstring = "00000";
+  hexstring += conf->id;
+  bleCommand cmd = {'i', hexstring};
+  sendCommand(cmd);
 }
