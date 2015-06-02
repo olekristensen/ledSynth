@@ -34,6 +34,8 @@
 #include <RFduinoBLE.h>
 #include <QueueList.h>
 #include <String.h>
+#include <TinyQueue.h>
+#include <EasyTransferRfduinoBLE.h>
 #include "tcs34725.h"
 #include "Fader.h"
 #include "flash.h"
@@ -50,6 +52,7 @@
 const String identityString = "LEDSYNTH";
 const int versionMajor = 0;
 const int versionMinor = 4;
+int newID = 0;
 
 
 // QUAD ENCODER
@@ -104,12 +107,14 @@ Fader faderIntensity(
   AFMS.getMotor(1),
   &faderIntensityPots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
+int intensityPercent;
 
 Adafruit_ADS1115 faderTemperaturePots(0x4A);/*16-bit*/ // I2C 0x4A
 Fader faderTemperature(
   AFMS.getMotor(2),
   &faderTemperaturePots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
+int temperaturePercent;
 
 // MENU
 
@@ -128,21 +133,14 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 // BLUETOOTH
 
-enum bleInputStates { BIS_START, BIS_COMMAND, BIS_DATA, BIS_END };
-int bleInputState = BIS_START;
-char bleInputCommandBuf;
-String bleInputHexstringBuf;
-
-struct bleCommand {
-  char command;
-  String hexstring;
-};
-
-QueueList <bleCommand> bleCommandQueue;
+bool bleAdvertising = false;
+TinyQueue<char> tq(20 * 100);
 long millisLastCommand = 0;
 
-bool bleAdvertising = false;
+// GUINO
 
+int saveConfigButton = 0;
+int flexLabelId = 0;
 
 // STATE
 
@@ -163,6 +161,7 @@ int state = S_BOOT;
 
 long millisLastFrame = 0;
 long frameCount = 0;
+int millisPerFrame = 0;
 
 void setup() {
 
@@ -192,6 +191,8 @@ void setup() {
       }
     }
   }
+
+  newID = conf->id;
 
   pinMode(quadButtonPin, INPUT_PULLUP);
   RFduino_pinWakeCallback(2, LOW, quadButtonCallback);
@@ -248,6 +249,8 @@ void setup() {
 void loop() {
   long thisFrameMillis = millis();
   double t = thisFrameMillis * 0.001 * 0.5;
+  millisPerFrame = thisFrameMillis - millisLastFrame;
+
   int fadeSteps = 500;
   switch (state) {
 
@@ -358,12 +361,16 @@ void loop() {
       lcd.print("standalone");
       faderIntensity.setManual();
       faderTemperature.setManual();
+      intensityPercent = faderIntensity.getSetpointPercent();
+      temperaturePercent = faderTemperature.getSetpointPercent();
       state = S_STANDALONE_LOOP;
       break;
 
     case S_STANDALONE_LOOP  :
       faderIntensity.update();
       faderTemperature.update();
+      intensityPercent = faderIntensity.getSetpointPercent();
+      temperaturePercent = faderTemperature.getSetpointPercent();
 
       // Display
       lcd.setCursor(15, 0);
@@ -409,29 +416,26 @@ void loop() {
       lcd.write(byte(0)); // bluetooth icon
       faderIntensity.setAutomatic();
       faderTemperature.setAutomatic();
-      sendID();
+      gBegin();
+      intensityPercent = faderIntensity.getSetpointPercent();
+      temperaturePercent = faderTemperature.getSetpointPercent();
+      gUpdateValue(&intensityPercent);
+      gUpdateValue(&temperaturePercent);
       state = S_CONNECTED_LOOP;
       break;
 
     case S_CONNECTED_LOOP  :
 
-      while (!bleCommandQueue.isEmpty()) {
-        millisLastCommand = millis();
-        /* DEBUG
-        lcd.setCursor(0, 0);
-        lcd.write(byte(1)); // fat id number
-        lcd.print(" ");
-        lcd.print(bleCommandQueue.count());
-        lcd.print(" ");
-        lcd.print(bleCommandQueue.peek().command);
-        lcd.print(":");
-        lcd.print(bleCommandQueue.peek().hexstring);
-        //*/
-        processCommand(bleCommandQueue.pop());
+      if (guino_update()) {
+        millisLastCommand = thisFrameMillis;
       }
-
+      faderIntensity.setSetpointPercent(intensityPercent);
+      faderTemperature.setSetpointPercent(temperaturePercent);
       faderIntensity.update();
       faderTemperature.update();
+      //intensityPercent = faderIntensity.getSetpointPercent();
+      //temperaturePercent = faderTemperature.getSetpointPercent();
+
       // Display
       lcd.setCursor(15, 0);
       if (thisFrameMillis > millisLastCommand + 50) {
@@ -446,9 +450,7 @@ void loop() {
       lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
       lcd.print("%");
 
-      // millis per frame
-      lcd.setCursor(0, 1);
-      lcdPrintNumberPadded(thisFrameMillis - millisLastFrame, 2, ' ');
+      //gUpdateValue(&millisPerFrame);
 
       break;
 
@@ -460,44 +462,6 @@ void loop() {
 
 
 // BLUETOOTH
-
-
-void queueCommand (char command, String hexstring) {
-
-  while (bleCommandQueue.count() > 10) {
-    if (bleCommandQueue.peek().command == command)
-      bleCommandQueue.pop();
-  }
-  bleCommand cmd = {command, hexstring};
-  bleCommandQueue.push(cmd);
-}
-
-void processCommand (struct bleCommand cmd) {
-  switch (cmd.command) {
-    case 'i':
-      setID(cmd.hexstring.toInt());
-      break;
-    case 'I':
-      faderIntensity.setSetpointNormalised(cmd.hexstring.toInt() / 65535.0);
-      break;
-    case 'T':
-      faderTemperature.setSetpointNormalised(cmd.hexstring.toInt() / 65535.0);
-      break;
-  }
-}
-
-void sendCommand(struct bleCommand cmd) {
-  String cmdString = "";
-  cmdString += 0x01;
-  cmdString += cmd.command;
-  cmdString += cmd.hexstring;
-  cmdString += 0x03;
-  char cmdBuf[cmdString.length()+1];
-  cmdString.toCharArray(cmdBuf, cmdString.length()+1);
-  DEBUG_PRINT(cmdBuf);
-  while (! RFduinoBLE.send(cmdBuf, cmdString.length()+1))
-      DEBUG_PRINT("waiting");  // all tx buffers in use (can't send - try again later)
-}
 
 extern "C" {
 
@@ -513,57 +477,13 @@ extern "C" {
 
   void RFduinoBLE_onReceive(char *data, int len) {
     for (int i = 0; i < len; i++) {
-      bleInputStateMachine(data[i]);
+      tq.enqueue(data[i]);
     }
   }
 
   void RFduinoBLE_onAdvertisement(bool start)
   {
     bleAdvertising = start;
-  }
-}
-
-void bleInputStateMachine(char data) {
-  switch (bleInputState) {
-    case BIS_START:                                           // wait for start byte
-      if (data == 1) {
-        bleInputState = BIS_COMMAND;
-      }
-      break;
-    case BIS_COMMAND:                                           // wait for command
-      if (data == 'I' || data == 'T' || data == 'i' ) { // If we received a valid command
-        bleInputCommandBuf = data;                             // store it
-        bleInputHexstringBuf = "";                             // prepare to receive a hex string
-        bleInputState = BIS_DATA;
-      } else if (data != 1) {                        //Stay in state 2 if we received another 0x01
-        state = BIS_START;
-      }
-      break;
-    case  BIS_DATA:                                            // receive hex string
-      if ((data >= 'a' && data <= 'z') || (data >= 'A' && data <= 'Z') || (data >= '0' && data <= '9')) {
-        bleInputHexstringBuf = bleInputHexstringBuf + data;               // if we received a valid hex byte, add it to the end of the string
-        if (bleInputHexstringBuf.length() == 6) {               // If we have received 6 characters (24 bits) move to state 4
-          bleInputState = BIS_END;
-        }
-      } else if (data == 1) {                         // If we received another 0x01 back to state 2
-        bleInputState = BIS_COMMAND;
-      } else {
-        bleInputState = BIS_START;                           // Anything else is invalid - back to look for 0x01
-      }
-      break;
-    case BIS_END:
-      if (data == 3)                                   // 0x03=valid terminator
-      {
-        queueCommand(bleInputCommandBuf, bleInputHexstringBuf);            // We have a valid command message - process it
-        //while (! RFduinoBLE.send(bleInputCommandBuf))
-        ;  // all tx buffers in use (can't send - try again later)
-        bleInputState = BIS_START;
-      } else if (data == 1) {                          // 0x01= start of new message, back to state 2
-        bleInputState = BIS_COMMAND;
-      } else {
-        bleInputState = BIS_START;                             // anything else, back to look for 0x01
-      }
-      break;
   }
 }
 
@@ -580,7 +500,50 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
   lcd.print(number);
 }
 
-void setID(int id) {
+// GUINO
+
+// This is where you setup your interface
+void gInit()
+{
+  char identityChars[identityString.length() + 1];
+  identityString.toCharArray(identityChars, identityString.length() + 1);
+  gAddLabel(identityChars, 1);
+  flexLabelId = gAddLabel("STATUS", 2);
+  gAddSpacer(1);
+
+  gAddSlider(0, 100, "intensity", &intensityPercent);
+  gAddSlider(0, 100, "temperature", &temperaturePercent);
+  gAddSpacer(1);
+
+  gAddLabel("SETTINGS", 1);
+  gAddRotarySlider(0, 9, "ID", &newID);
+  saveConfigButton = gAddButton("SAVE");
+  //gAddSpacer(1);
+  //gAddMovingGraph("millis per frame", 0, 50, &millisPerFrame, 10);
+}
+
+// Method called everytime a button has been pressed in the interface.
+void gButtonPressed(int id)
+{
+  if (saveConfigButton == id)
+  {
+    if (newID != conf->id) {
+      saveConf(newID);
+    }
+  }
+}
+
+void gItemUpdated(int id)
+{
+  /*
+  if(rotaryRID == id || rotaryGID == id || rotaryBID == id)
+  {
+    gSetColor(r,g,b);
+  }
+  */
+}
+
+void saveConf(int id) {
   struct flash_conf_t newConf = { id, CONF_STATE_OK };
   while (!RFduinoBLE.radioActive) {} //wait until the radio is active, wastes time, but ensures we will get the most usage of non active cpu time
   delay(6);
@@ -596,11 +559,4 @@ void setID(int id) {
     }
     lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
   }
-}
-
-void sendID() {
-  String hexstring = "00000";
-  hexstring += conf->id;
-  bleCommand cmd = {'i', hexstring};
-  sendCommand(cmd);
 }

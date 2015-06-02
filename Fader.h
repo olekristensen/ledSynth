@@ -75,6 +75,10 @@ class Fader {
       _setpoint = setpoint;
     }
 
+    void setSetpointPercent(int setpoint) {
+      setSetpoint((setpoint/100.0) * 1023.0);
+    }
+
     void setSetpointNormalised(double setpoint) {
       setSetpoint(setpoint * 1023.0);
     }
@@ -85,6 +89,10 @@ class Fader {
 
     double getSetpointNormalised() {
       return getSetpoint() / 1023.0;
+    }
+
+    int getSetpointPercent() {
+      return round(getSetpoint() / 1023.0);
     }
 
     double getPos() {
