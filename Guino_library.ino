@@ -67,14 +67,16 @@ SEND_DATA_STRUCTURE guino_data;
 boolean guino_update()
 {
   while (tq.size() > 0) {
-   if (ET.receiveData())
+    if (ET.receiveData())
     {
-      Serial.print("CMD :");
-      Serial.println(guino_data.cmd);
-      Serial.print("ITEM:");
-      Serial.println(guino_data.item);
-      Serial.print("VAL :");
-      Serial.println(guino_data.value);
+      /*
+            Serial.print("CMD :");
+            Serial.println(guino_data.cmd);
+            Serial.print("ITEM:");
+            Serial.println(guino_data.item);
+            Serial.print("VAL :");
+            Serial.println(guino_data.value);
+      //*/
       switch (guino_data.cmd)
       {
         case guino_init:
@@ -88,7 +90,7 @@ boolean guino_update()
           gItemUpdated(guino_data.item);
           break;
         case guino_buttonPressed:
-          gButtonPressed(guino_data.item);
+            gButtonPressed(guino_data.item, guino_data.value);
           break;
         case guino_saveToBoard:
           /*      {

@@ -92,7 +92,7 @@ class Fader {
     }
 
     int getSetpointPercent() {
-      return round(getSetpoint() / 1023.0);
+      return round(getSetpoint() * 100.0 / 1023.0);
     }
 
     double getPos() {

@@ -139,8 +139,13 @@ long millisLastCommand = 0;
 
 // GUINO
 
-int saveConfigButton = 0;
-int flexLabelId = 0;
+int saveConfigButtonId = 0;
+int calibrateButtonId = 0;
+int statusMessageLabelId = 0;
+String statusMessage = "";
+long statusMessageMillisToClear = -1;
+void setStatusMessage(char * _text, long millisToShow = -1);
+
 
 // STATE
 
@@ -156,6 +161,7 @@ enum State { S_BOOT,
              S_CONNECTED_LOOP
            };
 int state = S_BOOT;
+void statefulLCDclear(int theState = -1);
 
 // TIME
 
@@ -211,22 +217,6 @@ void setup() {
   lcd.createChar(0, lcdCharBluetooth);   //Bluetooth Icon
   lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
 
-  lcd.clear();
-  //Print unit info on display
-  lcd.write(byte(1));
-  lcd.print(" ");
-  if (conf->state == CONF_STATE_OK)
-    lcd.print(identityString);
-  else if (conf->state == CONF_STATE_DEFAULT)
-    lcd.print("unconfigured");
-  else if (conf->state == CONF_STATE_ERROR)
-    lcd.print("conf error");
-  lcd.setCursor(2, 1);
-  lcd.print("v.");
-  lcd.print(versionMajor);
-  lcd.print(".");
-  lcd.print(versionMinor);
-
   //Start BLE Advertisement
   RFduinoBLE.advertisementInterval = 200;
   RFduinoBLE.deviceName = identityString.cstr();
@@ -255,6 +245,7 @@ void loop() {
   switch (state) {
 
     case S_BOOT :
+      statefulLCDclear();
       for (int i = 0; i < fadeSteps; i++) {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
         // fade up from warm to cold
@@ -266,24 +257,17 @@ void loop() {
       break;
 
     case S_FADER_CALIBRATE :
-      state = S_BLE_SETUP;
-      lcd.clear();
-      lcd.write(byte(1));
-      lcd.print(" ");
-      lcd.print("calibrating...");
-      faderTemperature.calibrate();
-      faderIntensity.calibrate();
-      lcd.clear();
+      statefulLCDclear();
+      calibrateFaders();
       if (digitalRead(quadButtonPin) == LOW) {
         state = S_MENU;
+      } else {
+        state = S_BLE_SETUP;
       }
       break;
 
     case S_MENU :
-      lcd.clear();
-      lcd.write(byte(1));
-
-
+      statefulLCDclear();
       break;
 
     case S_QDEC_TEST :
@@ -354,11 +338,7 @@ void loop() {
         setDisplayColorRGB(1.0, iNorm, iNorm * iNorm);
         delay(1);
       }
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.write(byte(1)); // fat id number
-      lcd.print(" ");
-      lcd.print("standalone");
+      statefulLCDclear();
       faderIntensity.setManual();
       faderTemperature.setManual();
       intensityPercent = faderIntensity.getSetpointPercent();
@@ -393,11 +373,7 @@ void loop() {
       break;
 
     case S_CONNECTED_SETUP :
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.write(byte(1)); // fat id number
-      lcd.print(" ");
-      lcd.print("connected");
+      statefulLCDclear();
       lcd.setCursor(15, 0);
       lcd.write(byte(0)); // bluetooth icon
       for (int i = 0; i < fadeSteps; i++) {
@@ -407,20 +383,11 @@ void loop() {
         setDisplayColorRGB(iNorm * iNorm, 1.0, iNorm);
         delay(1);
       }
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.write(byte(1)); // fat id number
-      lcd.print(" ");
-      lcd.print("connected");
-      lcd.setCursor(15, 0);
-      lcd.write(byte(0)); // bluetooth icon
+      intensityPercent = faderIntensity.getSetpointPercent();
+      temperaturePercent = faderTemperature.getSetpointPercent();
       faderIntensity.setAutomatic();
       faderTemperature.setAutomatic();
       gBegin();
-      intensityPercent = faderIntensity.getSetpointPercent();
-      temperaturePercent = faderTemperature.getSetpointPercent();
-      gUpdateValue(&intensityPercent);
-      gUpdateValue(&temperaturePercent);
       state = S_CONNECTED_LOOP;
       break;
 
@@ -451,6 +418,10 @@ void loop() {
       lcd.print("%");
 
       //gUpdateValue(&millisPerFrame);
+
+      if (statusMessageMillisToClear > thisFrameMillis) {
+        gUpdateLabel(statusMessageLabelId, "connected");
+      }
 
       break;
 
@@ -507,30 +478,56 @@ void gInit()
 {
   char identityChars[identityString.length() + 1];
   identityString.toCharArray(identityChars, identityString.length() + 1);
-  gAddLabel(identityChars, 1);
-  flexLabelId = gAddLabel("STATUS", 2);
+  gAddLabel(identityChars, 0);
+  statusMessageLabelId = gAddLabel("connecting", 2);
   gAddSpacer(1);
 
+  gAddLabel("LIGHT", 2);
   gAddSlider(0, 100, "intensity", &intensityPercent);
   gAddSlider(0, 100, "temperature", &temperaturePercent);
   gAddSpacer(1);
 
-  gAddLabel("SETTINGS", 1);
+  gAddLabel("IDENTITY", 2);
   gAddRotarySlider(0, 9, "ID", &newID);
-  saveConfigButton = gAddButton("SAVE");
+  saveConfigButtonId = gAddButton("save id");
+  gAddSpacer(1);
+
+  gAddLabel("FADERS", 2);
+  calibrateButtonId = gAddButton("calibrate");
   //gAddSpacer(1);
   //gAddMovingGraph("millis per frame", 0, 50, &millisPerFrame, 10);
+
+  //gAddSpacer(1);
+  setStatusMessage("connected");
 }
 
-// Method called everytime a button has been pressed in the interface.
-void gButtonPressed(int id)
+void setStatusMessage(char * _text, long millisToShow) {
+  statusMessage = _text;
+  if (millisToShow < 0) {
+    statusMessageMillisToClear = -1;
+  } else {
+    statusMessageMillisToClear = millis() + millisToShow;
+  }
+  gUpdateLabel(statusMessageLabelId, _text);
+}
+
+void gButtonPressed(int id, int value)
 {
-  if (saveConfigButton == id)
+  if (saveConfigButtonId == id)
   {
     if (newID != conf->id) {
       saveConf(newID);
+      setStatusMessage("saved new id");
     }
   }
+  if (calibrateButtonId == id && value > 0)
+  {
+    setStatusMessage("calibrating faders");
+    calibrateFaders();
+    setStatusMessage("faders calibrated", 5000);
+  }
+
+
 }
 
 void gItemUpdated(int id)
@@ -552,11 +549,75 @@ void saveConf(int id) {
     conf = new struct flash_conf_t;
     conf->id = 0;
     conf->state = CONF_STATE_ERROR;
+    newID = 0;
   } else {
     if (DEBUG_V == 1) {
       DEBUG_PRINT("CONF: Saved new id");
       debug_conf( conf );
     }
     lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
+  }
+}
+
+void calibrateFaders() {
+  statefulLCDclear(S_FADER_CALIBRATE);
+  faderTemperature.calibrate();
+  faderIntensity.calibrate();
+  statefulLCDclear();
+}
+
+void statefulLCDclear(int theState) {
+  if (theState == -1) {
+    theState = state;
+  }
+
+  lcd.clear();
+  lcd.write(byte(1));
+
+  switch (theState) {
+
+    case S_BOOT :
+      lcd.setCursor(2, 0);
+      if (conf->state == CONF_STATE_OK)
+        lcd.print(identityString);
+      else if (conf->state == CONF_STATE_DEFAULT)
+        lcd.print("unconfigured");
+      else if (conf->state == CONF_STATE_ERROR)
+        lcd.print("conf error");
+      lcd.setCursor(2, 1);
+      lcd.print("v.");
+      lcd.print(versionMajor);
+      lcd.print(".");
+      lcd.print(versionMinor);
+      break;
+
+    case S_FADER_CALIBRATE :
+      lcd.setCursor(2, 0);
+      lcd.print("calibrating...");
+      break;
+
+    case S_MENU :
+      break;
+
+    case S_QDEC_TEST :
+      break;
+
+    case S_PID_TEST :
+      break;
+
+    case S_BLE_SETUP :
+      break;
+
+    case S_STANDALONE_SETUP :
+    case S_STANDALONE_LOOP  :
+      lcd.setCursor(2, 0);
+      lcd.print("standalone");
+      break;
+
+    case S_CONNECTED_SETUP :
+    case S_CONNECTED_LOOP  :
+      lcd.setCursor(2, 0);
+      lcd.print("connected");
+      break;
   }
 }
