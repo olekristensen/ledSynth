@@ -20,26 +20,26 @@
     olek@itu.dk
 */
 
-// TODO: Setup menu
-// TODO: Binary protocol for bluetooth
+// TODO: Setup menu?
 // TODO: Range pots
 // TODO: Light sensor
+// TODO: DMX output
 
-#include <Wire.h>
+#include <Wire.h>                    // I2C
 #include <LiquidTWI.h>               // Display
 #include <Adafruit_ADS1015.h>        // Analog Digital Converter
 #include <Adafruit_MotorShield.h>    // Motor Shield
-#include <Adafruit_TCS34725.h>       // Light Sensor
-#include <PID_v1.h>
-#include <RFduinoBLE.h>
-#include <QueueList.h>
-#include <String.h>
-#include <TinyQueue.h>
-#include <EasyTransferRfduinoBLE.h>
-#include "tcs34725.h"
-#include "Fader.h"
-#include "flash.h"
-#include "qdec.h"
+#include <Adafruit_TCS34725.h>       // Light Sensor base
+#include "tcs34725.h"                // Light Sensor autoranging
+#include <RFduinoBLE.h>              // RFduino BLE
+#include <String.h>                  // Text manipulation
+#include <TinyQueue.h>               // Input char queue for EasyTransfer
+#include <EasyTransferRfduinoBLE.h>  // Easy Transfer for bluetooth
+#include <PID_v1.h>                  // PID control for faders
+#include "Fader.h"                   // Fader class
+#include "flash.h"                   // Flash memory
+#include "qdec.h"                    // Quadrature Decoder
+#include "i2cDmx.h"                  // DMX
 
 // DEBUG
 
@@ -49,9 +49,9 @@
 
 // IDENTITY
 
-const String identityString = "LEDSYNTH";
+const String identityString = "light node";
 const int versionMajor = 0;
-const int versionMinor = 4;
+const int versionMinor = 5;
 int newID = 0;
 
 
@@ -124,11 +124,22 @@ int temperaturePercent;
 // LIGHT SENSOR
 
 tcs34725 lightSensor; // I2C 0x29
+int lightSensorLux;
+int lightSensorCt;
+int lightSensorR;
+int lightSensorG;
+int lightSensorB;
+int lightSensorC;
 
 
 // PWM
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+
+
+// DMX
+
+i2cDmx dmx;        //I2C 0x64
 
 
 // BLUETOOTH
@@ -137,13 +148,18 @@ bool bleAdvertising = false;
 TinyQueue<char> tq(20 * 100);
 long millisLastCommand = 0;
 
+
 // GUINO
 
+int titleLabelId = 0;
 int saveConfigButtonId = 0;
 int calibrateButtonId = 0;
 int statusMessageLabelId = 0;
+int lightsensorButtonId = 0;
+int idSliderId = 0;
 String statusMessage = "";
 long statusMessageMillisToClear = -1;
+bool statusMessageCleared = false;
 void setStatusMessage(char * _text, long millisToShow = -1);
 
 
@@ -163,11 +179,16 @@ enum State { S_BOOT,
 int state = S_BOOT;
 void statefulLCDclear(int theState = -1);
 
+
 // TIME
 
 long millisLastFrame = 0;
 long frameCount = 0;
 int millisPerFrame = 0;
+
+
+
+
 
 void setup() {
 
@@ -178,6 +199,7 @@ void setup() {
   }
 
   lightSensor.begin();
+  lightSensor.getData();
 
   lcd.begin(16, 2);
 
@@ -234,7 +256,14 @@ void setup() {
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
 
+  // FIXTURES
+
+  dmx.addFixture(new TVL2000());
+
 }
+
+
+
 
 void loop() {
   long thisFrameMillis = millis();
@@ -352,6 +381,9 @@ void loop() {
       intensityPercent = faderIntensity.getSetpointPercent();
       temperaturePercent = faderTemperature.getSetpointPercent();
 
+      dmx.setTemperatureKelvin(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() )));
+      dmx.setIntensity(faderIntensity.getSetpointNormalised());
+      dmx.sendDmx();
       // Display
       lcd.setCursor(15, 0);
       if (thisFrameMillis % 2000 < 800 && thisFrameMillis % 400 < 200 ) {
@@ -362,8 +394,14 @@ void loop() {
       lcd.setCursor(0, 1);
       lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 5, ' ');
       lcd.print("%");
+      /* temperature percent
       lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
       lcd.print("%");
+      */
+      // temperature kelvin
+      lcdPrintNumberPadded(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ))
+                           , 6, ' ');
+      lcd.print("k");
 
       /*
       // millis per frame
@@ -396,12 +434,17 @@ void loop() {
       if (guino_update()) {
         millisLastCommand = thisFrameMillis;
       }
-      faderIntensity.setSetpointPercent(intensityPercent);
-      faderTemperature.setSetpointPercent(temperaturePercent);
+      // smoothing?
+      faderIntensity.setSetpointNormalised((0.2 * intensityPercent / 100.0) + (0.8 * faderIntensity.getSetpointNormalised()) );
+      faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
       faderIntensity.update();
       faderTemperature.update();
       //intensityPercent = faderIntensity.getSetpointPercent();
       //temperaturePercent = faderTemperature.getSetpointPercent();
+
+      dmx.setTemperatureKelvin(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() )));
+      dmx.setIntensity(faderIntensity.getSetpointNormalised());
+      dmx.sendDmx();
 
       // Display
       lcd.setCursor(15, 0);
@@ -414,13 +457,21 @@ void loop() {
       lcd.setCursor(2, 1);
       lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 3, ' ');
       lcd.print("%");
+      /* temperature percent
       lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
       lcd.print("%");
+      */
+      // temperature kelvin
+      lcdPrintNumberPadded(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ))
+                           , 6, ' ');
+      lcd.print("k");
 
-      //gUpdateValue(&millisPerFrame);
 
-      if (statusMessageMillisToClear > thisFrameMillis) {
+      gUpdateValue(&millisPerFrame);
+
+      if (statusMessageMillisToClear < thisFrameMillis && !statusMessageCleared) {
         gUpdateLabel(statusMessageLabelId, "connected");
+        statusMessageCleared = true;
       }
 
       break;
@@ -476,35 +527,54 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
 // This is where you setup your interface
 void gInit()
 {
-  char identityChars[identityString.length() + 1];
-  identityString.toCharArray(identityChars, identityString.length() + 1);
-  gAddLabel(identityChars, 0);
-  statusMessageLabelId = gAddLabel("connecting", 2);
-  gAddSpacer(1);
-
-  gAddLabel("LIGHT", 2);
-  gAddSlider(0, 100, "intensity", &intensityPercent);
-  gAddSlider(0, 100, "temperature", &temperaturePercent);
-  gAddSpacer(1);
-
-  gAddLabel("IDENTITY", 2);
-  gAddRotarySlider(0, 9, "ID", &newID);
-  saveConfigButtonId = gAddButton("save id");
+  gAddLabel(" ", 2);
+  String identityWithNumber = identityString + " " + conf->id;
+  char identityChars[identityWithNumber.length() + 1];
+  identityWithNumber.toCharArray(identityChars, identityWithNumber.length() + 1);
+  titleLabelId = gAddLabel(identityChars, 0);
+  gAddLabel(" ", 2);
   gAddSpacer(1);
 
   gAddLabel("FADERS", 2);
+  gAddSlider(0, 100, "intensity", &intensityPercent);
+  gAddSlider(0, 100, "temperature", &temperaturePercent);
   calibrateButtonId = gAddButton("calibrate");
-  //gAddSpacer(1);
-  //gAddMovingGraph("millis per frame", 0, 50, &millisPerFrame, 10);
+  gAddSpacer(1);
 
-  //gAddSpacer(1);
+  gAddLabel("SENSOR", 2);
+  gAddSlider(0, 10000, "lux", &lightSensorLux);
+  gAddSlider(0, 10000, "ct", &lightSensorCt);
+  lightsensorButtonId = gAddButton("measure");
+  //gAddSlider(0, 1023, "r", &lightSensorR);
+  //gAddSlider(0, 1023, "g", &lightSensorG);
+  //gAddSlider(0, 1023, "b", &lightSensorB);
+  //gAddSlider(0, 1023, "c", &lightSensorC);
+  gAddSpacer(1);
+
+  gAddLabel("IDENTITY", 2);
+  idSliderId = gAddSlider(0, 9, "ID", &newID);
+  saveConfigButtonId = gAddButton("save id");
+  gAddSpacer(1);
+
+  gAddMovingGraph("MILLIS/FRAME", 0, 50, &millisPerFrame, 10);
+  gAddSpacer(1);
+
+  statusMessageLabelId = gAddLabel("connecting", 2);
   setStatusMessage("connected");
+}
+
+void updateTitle() {
+  String identityWithNumber = identityString + " " +  conf->id;
+  char identityChars[identityWithNumber.length() + 1];
+  identityWithNumber.toCharArray(identityChars, identityWithNumber.length() + 1);
+  gUpdateLabel(titleLabelId, identityChars);
 }
 
 void setStatusMessage(char * _text, long millisToShow) {
   statusMessage = _text;
+  statusMessageCleared = false;
   if (millisToShow < 0) {
-    statusMessageMillisToClear = -1;
+    statusMessageMillisToClear = millis() + 2000;
   } else {
     statusMessageMillisToClear = millis() + millisToShow;
   }
@@ -513,11 +583,13 @@ void setStatusMessage(char * _text, long millisToShow) {
 
 void gButtonPressed(int id, int value)
 {
-  if (saveConfigButtonId == id)
+  if (saveConfigButtonId == id && value > 0)
   {
     if (newID != conf->id) {
       saveConf(newID);
+      updateTitle();
       setStatusMessage("saved new id");
+      //gUpdateLabel(saveConfigButtonId, " ");
     }
   }
   if (calibrateButtonId == id && value > 0)
@@ -526,18 +598,32 @@ void gButtonPressed(int id, int value)
     calibrateFaders();
     setStatusMessage("faders calibrated", 5000);
   }
-
-
+  if (lightsensorButtonId == id && value > 0)
+  {
+    setStatusMessage("measuring light");
+    measureLight();
+    gUpdateValue(&lightSensorR);
+    gUpdateValue(&lightSensorG);
+    gUpdateValue(&lightSensorB);
+    gUpdateValue(&lightSensorC);
+    gUpdateValue(&lightSensorLux);
+    gUpdateValue(&lightSensorCt);
+    setStatusMessage("light measured", 5000);
+  }
 }
 
 void gItemUpdated(int id)
 {
-  /*
-  if(rotaryRID == id || rotaryGID == id || rotaryBID == id)
-  {
-    gSetColor(r,g,b);
-  }
+  /*  if(idSliderId == id){
+      gUpdateLabel(saveConfigButtonId, "save id");
+    }
   */
+  /*
+    if(rotaryRID == id || rotaryGID == id || rotaryBID == id)
+    {
+      gSetColor(r,g,b);
+    }
+    */
 }
 
 void saveConf(int id) {
@@ -563,6 +649,19 @@ void calibrateFaders() {
   statefulLCDclear(S_FADER_CALIBRATE);
   faderTemperature.calibrate();
   faderIntensity.calibrate();
+  statefulLCDclear();
+}
+void measureLight() {
+  statefulLCDclear(-2);
+  lcd.setCursor(2, 0);
+  lcd.print("measuring light");
+  lightSensor.getData();
+  lightSensorR = lightSensor.r_comp;
+  lightSensorG = lightSensor.g_comp;
+  lightSensorB = lightSensor.b_comp;
+  lightSensorC = lightSensor.c_comp;
+  lightSensorLux = lightSensor.lux;
+  lightSensorCt = lightSensor.ct;
   statefulLCDclear();
 }
 
@@ -618,6 +717,8 @@ void statefulLCDclear(int theState) {
     case S_CONNECTED_LOOP  :
       lcd.setCursor(2, 0);
       lcd.print("connected");
+      break;
+    default  :
       break;
   }
 }

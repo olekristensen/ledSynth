@@ -118,7 +118,6 @@ void tcs34725::getData(void) {
     else if (agc_lst[agc_cur].mincnt && c < agc_lst[agc_cur].mincnt)
       agc_cur--;
     else break;
-
     setGainTime(); 
     delay((256 - atime) * 2.4 * 2); // shock absorber
     tcs.getRawData(&r, &g, &b, &c);

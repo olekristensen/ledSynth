@@ -55,7 +55,7 @@ struct SEND_DATA_STRUCTURE
 // Find a way to dynamically allocate memory
 int guino_maxGUIItems = 100;
 int guino_item_counter = 0;
-int *guino_item_values[100];
+void *guino_item_values[100];
 int gTmpInt = 0; // temporary int for items without a variable
 boolean internalInit = true; // boolean to initialize before connecting to serial
 
@@ -85,12 +85,12 @@ boolean guino_update()
           guidino_initialized = true;
           break;
         case guino_setValue:
-          *guino_item_values[guino_data.item] = guino_data.value;
+          *(int*)guino_item_values[guino_data.item] = guino_data.value;
           guino_data.cmd = guino_executed;
           gItemUpdated(guino_data.item);
           break;
         case guino_buttonPressed:
-            gButtonPressed(guino_data.item, guino_data.value);
+          gButtonPressed(guino_data.item, guino_data.value);
           break;
         case guino_saveToBoard:
           /*      {
@@ -266,7 +266,7 @@ int gUpdateLabel(int _item, char * _text)
 
   gSendCommand(guino_clearLabel, _item, 0);
   for (int i = 0; i < strlen(_text); i++) {
-    gSendCommand(guino_addChar, _item, (int16_t)_text[i]);
+    gSendCommand(guino_addChar, _item, (int)_text[i]);
   }
 
 
@@ -296,6 +296,7 @@ int gAddRotarySlider(int _min, int _max, char * _name, int * _variable)
 
 }
 
+
 int gAddSlider(int _min, int _max, char * _name, int * _variable)
 {
   if (guino_maxGUIItems > guino_item_counter)
@@ -319,7 +320,7 @@ int gAddSlider(int _min, int _max, char * _name, int * _variable)
 
 void gUpdateValue(int _item)
 {
-  gSendCommand(guino_setValue, _item, *guino_item_values[_item]);
+  gSendCommand(guino_setValue, _item, *(int*)guino_item_values[_item]);
 }
 
 
