@@ -500,9 +500,11 @@ void loop() {
   }
   //  Battery level
   
-  batteryLevel = constrain(mapFloat(pow(getBatteryLevelNormalised(),2),0.75,0.95,0.0,1.0),0.0,1.0)*(batteryLevels-1);
-  
-  lcd.createChar(3, lcdCharBatteryLevels[batteryLevel]); //Fat indentity number
+  int newBatteryLevel = constrain(mapFloat(pow(getBatteryLevelNormalised(),2),0.75,0.95,0.0,1.0),0.0,1.0)*(batteryLevels-1);
+  if(newBatteryLevel != batteryLevel){
+    batteryLevel = newBatteryLevel;  
+    lcd.createChar(3, lcdCharBatteryLevels[batteryLevel]); //Fat indentity number
+  }
   lcd.setCursor(15, 1);
   lcd.write(byte(3));
 
