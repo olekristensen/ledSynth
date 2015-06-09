@@ -89,6 +89,20 @@ byte lcdCharFat9[8] = {0xe, 0x1b, 0x1b, 0xf, 0x3, 0x1b, 0xe};
 byte lcdCharFat0[8] = {0xe, 0x1b, 0x1b, 0x1b, 0x1b, 0x1b, 0xe};
 byte * lcdCharNumbers[10] = {lcdCharFat0, lcdCharFat1, lcdCharFat2, lcdCharFat3, lcdCharFat4, lcdCharFat5, lcdCharFat6, lcdCharFat7, lcdCharFat8, lcdCharFat9 };
 
+// BATTERY
+
+byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
+byte lcdCharBatteryLevel5[8] = {0x6, 0x9, 0xf, 0xf, 0xf, 0xf, 0xf};
+byte lcdCharBatteryLevel4[8] = {0x6, 0x9, 0x9, 0xf, 0xf, 0xf, 0xf};
+byte lcdCharBatteryLevel3[8] = {0x6, 0x9, 0x9, 0x9, 0xf, 0xf, 0xf};
+byte lcdCharBatteryLevel2[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0xf, 0xf};
+byte lcdCharBatteryLevel1[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
+byte lcdCharBatteryLevel0[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
+byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLevel1, lcdCharBatteryLevel2, lcdCharBatteryLevel3, lcdCharBatteryLevel4, lcdCharBatteryLevel5, lcdCharBatteryLevel6 };
+
+int batteryLevels = 7;
+int batteryLevel = 0;
+
 
 // FADERS
 
@@ -130,6 +144,7 @@ int lightSensorR;
 int lightSensorG;
 int lightSensorB;
 int lightSensorC;
+bool lightSensorOnline = false;
 
 
 // PWM
@@ -174,7 +189,7 @@ enum State { S_BOOT,
              S_STANDALONE_SETUP,
              S_STANDALONE_LOOP,
              S_CONNECTED_SETUP,
-             S_CONNECTED_LOOP
+             S_CONNECTED_LOOP,
            };
 int state = S_BOOT;
 void statefulLCDclear(int theState = -1);
@@ -198,8 +213,13 @@ void setup() {
     Serial.begin(9600); // set up Serial library at 9600 bps
   }
 
-  lightSensor.begin();
-  lightSensor.getData();
+  // BATTERY
+
+  pinMode(1, INPUT);
+
+
+  lightSensorOnline = lightSensor.begin();
+  if (lightSensorOnline) lightSensor.getData();
 
   lcd.begin(16, 2);
 
@@ -289,7 +309,7 @@ void loop() {
       statefulLCDclear();
       calibrateFaders();
       if (digitalRead(quadButtonPin) == LOW) {
-        state = S_MENU;
+        state = S_QDEC_TEST;
       } else {
         state = S_BLE_SETUP;
       }
@@ -439,6 +459,7 @@ void loop() {
       faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
       faderIntensity.update();
       faderTemperature.update();
+
       //intensityPercent = faderIntensity.getSetpointPercent();
       //temperaturePercent = faderTemperature.getSetpointPercent();
 
@@ -477,6 +498,13 @@ void loop() {
       break;
 
   }
+  //  Battery level
+  
+  batteryLevel = constrain(mapFloat(pow(getBatteryLevelNormalised(),2),0.75,0.95,0.0,1.0),0.0,1.0)*(batteryLevels-1);
+  
+  lcd.createChar(3, lcdCharBatteryLevels[batteryLevel]); //Fat indentity number
+  lcd.setCursor(15, 1);
+  lcd.write(byte(3));
 
   frameCount++;
   millisLastFrame = thisFrameMillis;
@@ -540,16 +568,20 @@ void gInit()
   gAddSlider(0, 100, "temperature", &temperaturePercent);
   calibrateButtonId = gAddButton("calibrate");
   gAddSpacer(1);
-
-  gAddLabel("SENSOR", 2);
-  gAddSlider(0, 10000, "lux", &lightSensorLux);
-  gAddSlider(0, 10000, "ct", &lightSensorCt);
-  lightsensorButtonId = gAddButton("measure");
-  //gAddSlider(0, 1023, "r", &lightSensorR);
-  //gAddSlider(0, 1023, "g", &lightSensorG);
-  //gAddSlider(0, 1023, "b", &lightSensorB);
-  //gAddSlider(0, 1023, "c", &lightSensorC);
+  if (lightSensorOnline) {
+    gAddLabel("SENSOR", 2);
+    gAddSlider(0, 10000, "lux", &lightSensorLux);
+    gAddSlider(0, 10000, "ct", &lightSensorCt);
+    lightsensorButtonId = gAddButton("measure");
+    //gAddSlider(0, 1023, "r", &lightSensorR);
+    //gAddSlider(0, 1023, "g", &lightSensorG);
+    //gAddSlider(0, 1023, "b", &lightSensorB);
+    //gAddSlider(0, 1023, "c", &lightSensorC);
+  } else {
+    gAddLabel("SENSOR OFFLINE", 2);
+  }
   gAddSpacer(1);
+
 
   gAddLabel("IDENTITY", 2);
   idSliderId = gAddSlider(0, 9, "ID", &newID);
@@ -721,4 +753,8 @@ void statefulLCDclear(int theState) {
     default  :
       break;
   }
+}
+
+float getBatteryLevelNormalised() {
+  return constrain((analogRead(1) / 1023.0) * (3.33 / 2.366),0.0,1.0);
 }
