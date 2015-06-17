@@ -66,6 +66,7 @@ SEND_DATA_STRUCTURE guino_data;
 
 boolean guino_update()
 {
+  bool hadCommands = false;
   while (tq.size() > 0) {
     if (ET.receiveData())
     {
@@ -105,11 +106,10 @@ boolean guino_update()
           */
           break;
       }
-      return true;
-    } else {
-      return false;
-    }
+      hadCommands = true;
+    } 
   }
+  return hadCommands;
 }
 
 void gSetColor(int _red, int _green, int _blue)

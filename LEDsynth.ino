@@ -43,7 +43,7 @@
 
 // DEBUG
 
-#define DEBUG_V 1
+#define DEBUG_V 0
 #include <DebugUtils.h>
 
 
@@ -102,6 +102,7 @@ byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLevel1, lc
 
 int batteryLevels = 7;
 int batteryLevel = 0;
+float batteryLevelSmoothNormalised = 0.0;
 
 
 // FADERS
@@ -109,7 +110,7 @@ int batteryLevel = 0;
 Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x61); // I2C 0x61
 
 const double faderMotorSpeed = 200;
-const int faderMotorHertz = 110 / 2;
+const int faderMotorHertz = 440 / 8; // max 1600
 const double faderPidP = .75;
 const double faderPidI = 20;
 const double faderPidD = 0.002;
@@ -132,7 +133,8 @@ int temperaturePercent;
 
 // MENU
 
-
+int connectionChannelID = 0;
+const int maxChannelID = 9;
 
 
 // LIGHT SENSOR
@@ -162,7 +164,7 @@ i2cDmx dmx;        //I2C 0x64
 bool bleAdvertising = false;
 TinyQueue<char> tq(20 * 100);
 long millisLastCommand = 0;
-
+int tqSize = 0;
 
 // GUINO
 
@@ -172,6 +174,7 @@ int calibrateButtonId = 0;
 int statusMessageLabelId = 0;
 int lightsensorButtonId = 0;
 int idSliderId = 0;
+int connectionChannelIdSliderId = 0;
 String statusMessage = "";
 long statusMessageMillisToClear = -1;
 bool statusMessageCleared = false;
@@ -200,8 +203,6 @@ void statefulLCDclear(int theState = -1);
 long millisLastFrame = 0;
 long frameCount = 0;
 int millisPerFrame = 0;
-
-
 
 
 
@@ -279,6 +280,8 @@ void setup() {
   // FIXTURES
 
   dmx.addFixture(new TVL2000());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
 
 }
 
@@ -302,6 +305,7 @@ void loop() {
         delay(10);
       }
       delay(250);
+      quad.enable();
       state = S_FADER_CALIBRATE;
       break;
 
@@ -320,8 +324,6 @@ void loop() {
       break;
 
     case S_QDEC_TEST :
-
-      quad.enable();
 
       lcd.setCursor(2, 0);
       lcd.print("Quad Encoder");
@@ -434,6 +436,7 @@ void loop() {
       statefulLCDclear();
       lcd.setCursor(15, 0);
       lcd.write(byte(0)); // bluetooth icon
+      quadPos = 0;
       for (int i = 0; i < fadeSteps; i++) {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
         iNorm = 0.5 + (sin(2.0 * (iNorm + 0.25) * PI) / 2.0);
@@ -450,13 +453,28 @@ void loop() {
       break;
 
     case S_CONNECTED_LOOP  :
+      quadPos += quad.readDelta();
+      if (quadPos != 0 && quadPos % quadPhasesPerTick == 0) {
+        connectionChannelID = max(0, min(maxChannelID, connectionChannelID + (quadPos / quadPhasesPerTick)));
+        gUpdateValue(&connectionChannelID);
+        quadPos = 0;
+      }
+      lcd.setCursor(0, 1);
+      if (connectionChannelID != 0) {
+        lcd.print(connectionChannelID);
+      } else {
+        lcd.print(" ");
+      }
 
       if (guino_update()) {
-        millisLastCommand = thisFrameMillis;
+        //millisLastCommand = thisFrameMillis;
       }
       // smoothing?
-      faderIntensity.setSetpointNormalised((0.2 * intensityPercent / 100.0) + (0.8 * faderIntensity.getSetpointNormalised()) );
-      faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
+      // faderIntensity.setSetpointNormalised((0.2 * intensityPercent / 100.0) + (0.8 * faderIntensity.getSetpointNormalised()) );
+      // faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
+      faderIntensity.setSetpointNormalised(intensityPercent/100.0);
+      faderTemperature.setSetpointNormalised(temperaturePercent/100.0);
+
       faderIntensity.update();
       faderTemperature.update();
 
@@ -469,7 +487,7 @@ void loop() {
 
       // Display
       lcd.setCursor(15, 0);
-      if (thisFrameMillis > millisLastCommand + 50) {
+      if (thisFrameMillis > millisLastCommand - 5) {
         lcd.write(byte(0));
       } else {
         lcd.print(" ");
@@ -489,6 +507,10 @@ void loop() {
 
 
       gUpdateValue(&millisPerFrame);
+      //gUpdateValue(&batteryLevel);
+      tqSize = tq.size();
+      gUpdateValue(&tqSize);
+
 
       if (statusMessageMillisToClear < thisFrameMillis && !statusMessageCleared) {
         gUpdateLabel(statusMessageLabelId, "connected");
@@ -499,14 +521,19 @@ void loop() {
 
   }
   //  Battery level
-  
-  int newBatteryLevel = constrain(mapFloat(pow(getBatteryLevelNormalised(),2),0.75,0.95,0.0,1.0),0.0,1.0)*(batteryLevels-1);
-  if(newBatteryLevel != batteryLevel){
-    batteryLevel = newBatteryLevel;  
-    lcd.createChar(3, lcdCharBatteryLevels[batteryLevel]); //Fat indentity number
+
+  batteryLevelSmoothNormalised *= 0.99;
+  batteryLevelSmoothNormalised += 0.01 * constrain(mapFloat(pow(getBatteryLevelNormalised(), 2), 0.75, 0.975, 0.0, 1.0), 0.0, 1.0);
+
+  if (frameCount % 10 == 0) {
+    int newBatteryLevel = round(batteryLevelSmoothNormalised * (batteryLevels - 1));
+    if (newBatteryLevel != batteryLevel) {
+      batteryLevel = newBatteryLevel;
+      lcd.createChar(3, lcdCharBatteryLevels[batteryLevel]);
+    }
+    lcd.setCursor(15, 1);
+    lcd.write(byte(3));
   }
-  lcd.setCursor(15, 1);
-  lcd.write(byte(3));
 
   frameCount++;
   millisLastFrame = thisFrameMillis;
@@ -531,6 +558,7 @@ extern "C" {
     for (int i = 0; i < len; i++) {
       tq.enqueue(data[i]);
     }
+    millisLastCommand = millisLastFrame;
   }
 
   void RFduinoBLE_onAdvertisement(bool start)
@@ -586,9 +614,13 @@ void gInit()
 
 
   gAddLabel("IDENTITY", 2);
-  idSliderId = gAddSlider(0, 9, "ID", &newID);
+  idSliderId = gAddSlider(0, maxChannelID, "ID", &newID);
   saveConfigButtonId = gAddButton("save id");
+  connectionChannelIdSliderId = gAddSlider(0, maxChannelID, "CHANNEL", &connectionChannelID);
   gAddSpacer(1);
+
+  gAddMovingGraph("TQsize", 0, 2000, &tqSize, 10);
+//  gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
 
   gAddMovingGraph("MILLIS/FRAME", 0, 50, &millisPerFrame, 10);
   gAddSpacer(1);
@@ -758,5 +790,5 @@ void statefulLCDclear(int theState) {
 }
 
 float getBatteryLevelNormalised() {
-  return constrain((analogRead(1) / 1023.0) * (3.33 / 2.366),0.0,1.0);
+  return constrain((analogRead(1) / 1023.0) * (3.33 / 2.366), 0.0, 1.0);
 }

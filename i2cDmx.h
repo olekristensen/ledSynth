@@ -53,9 +53,36 @@ class DmxFixtureCWVW8bit : public DmxFixture {
     };
 };
 
+class DmxFixtureIT8bit : public DmxFixture {
+  public:
+    DmxFixtureIT8bit(int kelvinLow = 2700, int kelvinHigh = 6500, int channelCount = 2) : DmxFixture(kelvinLow, kelvinHigh, channelCount) {
+      ;
+    }
+    int setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
+      float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
+      data[startChannel] = byte(normalisedIntensity * 255);
+      data[startChannel + 1] = byte(temperatureNormalisedInRange * 255);
+      return _channelCount;
+    };
+};
+
+
+class DmxFixtureTI8bit : public DmxFixture {
+  public:
+    DmxFixtureTI8bit(int kelvinLow = 2700, int kelvinHigh = 6500, int channelCount = 2) : DmxFixture(kelvinLow, kelvinHigh, channelCount) {
+      ;
+    }
+    int setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
+      float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
+      data[startChannel] = byte(temperatureNormalisedInRange * 255);
+      data[startChannel + 1] = byte(normalisedIntensity * 255);
+      return _channelCount;
+    };
+};
+
 class TVL2000 : public DmxFixtureCWVW8bit {
   public:
-  TVL2000(int kelvinLow = 2700, int kelvinHigh = 6500, int channelCount = 2) : DmxFixtureCWVW8bit(kelvinLow, kelvinHigh, channelCount) {
+  TVL2000(int kelvinLow = 3200, int kelvinHigh = 6500, int channelCount = 2) : DmxFixtureCWVW8bit(kelvinLow, kelvinHigh, channelCount) {
     ;
   };
 };
