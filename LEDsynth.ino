@@ -20,6 +20,8 @@
     olek@itu.dk
 */
 
+// TODO: Display color crash
+
 // TODO: Setup menu?
 // TODO: Connection and mixing
 // TODO: Light sensor calibration
@@ -99,6 +101,10 @@ byte lcdCharFat9[8] = {0xe, 0x1b, 0x1b, 0xf, 0x3, 0x1b, 0xe};
 byte lcdCharFat0[8] = {0xe, 0x1b, 0x1b, 0x1b, 0x1b, 0x1b, 0xe};
 byte * lcdCharNumbers[10] = {lcdCharFat0, lcdCharFat1, lcdCharFat2, lcdCharFat3, lcdCharFat4, lcdCharFat5, lcdCharFat6, lcdCharFat7, lcdCharFat8, lcdCharFat9 };
 
+double displayRed = 1.0;
+double displayGreen = 1.0;
+double displayBlue = 1.0;
+
 // BATTERY
 
 byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
@@ -140,7 +146,7 @@ Fader faderTemperature(
   &faderTemperaturePots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 int temperaturePercent;
-
+int temperatureKelvin = 2700;
 
 // LIGHT SENSOR
 
@@ -305,8 +311,8 @@ void loop() {
       statefulLCDclear();
       for (int i = 0; i < fadeSteps; i++) {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
-        // fade up from warm to cold
-        setDisplayColorRGB(iNorm, iNorm * iNorm * iNorm, iNorm * iNorm * iNorm * iNorm);
+        temperatureToColor(round(mapFloat(iNorm, 0.0, 1.0, 1200.0, 6500.0)) , displayRed, displayGreen, displayBlue);
+        setDisplayColorRGB(displayRed, displayGreen, displayBlue);
         delay(10);
       }
       delay(250);
@@ -391,7 +397,7 @@ void loop() {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
         iNorm = 0.5 + (sin(2.0 * (iNorm + 0.25) * PI) / 2.0);
         // yellow flash
-        setDisplayColorRGB(1.0, iNorm, iNorm * iNorm);
+        setDisplayColorRGB(displayRed, iNorm*displayGreen, iNorm * iNorm * displayBlue);
         delay(1);
       }
       statefulLCDclear();
@@ -411,8 +417,9 @@ void loop() {
       faderTemperature.update();
       intensityPercent = faderIntensity.getSetpointPercent();
       temperaturePercent = faderTemperature.getSetpointPercent();
+      temperatureKelvin = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ));
 
-      dmx.setTemperatureKelvin(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() )));
+      dmx.setTemperatureKelvin(temperatureKelvin);
       dmx.setIntensity(faderIntensity.getSetpointNormalised());
       dmx.sendDmx();
       // Display
@@ -430,9 +437,11 @@ void loop() {
       lcd.print("%");
       */
       // temperature kelvin
-      lcdPrintNumberPadded(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ))
-                           , 6, ' ');
+      lcdPrintNumberPadded(temperatureKelvin, 6, ' ');
       lcd.print("k");
+
+      temperatureToColor(temperatureKelvin, displayRed, displayGreen, displayBlue);
+      setDisplayColorRGB(displayRed, displayGreen, displayBlue);
 
       /*
       // millis per frame
@@ -449,8 +458,8 @@ void loop() {
       for (int i = 0; i < fadeSteps; i++) {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
         iNorm = 0.5 + (sin(2.0 * (iNorm + 0.25) * PI) / 2.0);
-        // yellow flash
-        setDisplayColorRGB(iNorm * iNorm, 1.0, iNorm);
+        // green flash
+        setDisplayColorRGB(displayRed * iNorm * iNorm, displayGreen, displayBlue * iNorm);
         delay(1);
       }
       faderIntensity.setUseRanges(useFaderRanges > 0);
@@ -483,21 +492,17 @@ void loop() {
       // smoothing?
       // faderIntensity.setSetpointNormalised((0.2 * intensityPercent / 100.0) + (0.8 * faderIntensity.getSetpointNormalised()) );
       // faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
-      faderIntensity.setSetpointNormalised(intensityPercent/100.0);
-      faderTemperature.setSetpointNormalised(temperaturePercent/100.0);
+      faderIntensity.setSetpointNormalised(intensityPercent / 100.0);
+      faderTemperature.setSetpointNormalised(temperaturePercent / 100.0);
       faderIntensity.setUseRanges(useFaderRanges > 0);
       faderTemperature.setUseRanges(useFaderRanges > 0);
       faderIntensity.update();
       faderTemperature.update();
-      
-      if(useFaderRanges > 0){
-        
-      }
+      temperatureKelvin = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ));
 
       //intensityPercent = faderIntensity.getSetpointPercent();
       //temperaturePercent = faderTemperature.getSetpointPercent();
-
-      dmx.setTemperatureKelvin(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() )));
+      dmx.setTemperatureKelvin(temperatureKelvin);
       dmx.setIntensity(faderIntensity.getSetpointNormalised());
       dmx.sendDmx();
 
@@ -517,14 +522,16 @@ void loop() {
       lcd.print("%");
       */
       // temperature kelvin
-      lcdPrintNumberPadded(round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ))
-                           , 6, ' ');
+      lcdPrintNumberPadded(temperatureKelvin, 6, ' ');
       lcd.print("k");
 
-    gUpdateValue(&(faderIntensity._potRangeTopValue));
-    gUpdateValue(&(faderIntensity._potRangeBottomValue));
-    gUpdateValue(&(faderTemperature._potRangeTopValue));
-    gUpdateValue(&(faderTemperature._potRangeBottomValue));
+      temperatureToColor(temperatureKelvin, displayRed, displayGreen, displayBlue);
+      setDisplayColorRGB(displayRed, displayGreen, displayBlue);
+
+      gUpdateValue(&(faderIntensity._potRangeTopValue));
+      gUpdateValue(&(faderIntensity._potRangeBottomValue));
+      gUpdateValue(&(faderTemperature._potRangeTopValue));
+      gUpdateValue(&(faderTemperature._potRangeBottomValue));
 
       gUpdateValue(&millisPerFrame);
       //gUpdateValue(&batteryLevel);
@@ -588,9 +595,12 @@ extern "C" {
 }
 
 void setDisplayColorRGB(double r, double g, double b) {
+  r = constrain(r, 0.0, 1.0);
+  g = constrain(g, 0.0, 1.0);
+  b = constrain(b, 0.0, 1.0);
   pwm.setPWM(0, 0, 0xFFF - round( 0xFFF * r ));
-  pwm.setPWM(1, 0, 0xFFF - round( 0xFFF * g * 0.85));
-  pwm.setPWM(2, 0, 0xFFF - round( 0xFFF * b * 0.7));
+  pwm.setPWM(1, 0, 0xFFF - round( 0xFFF * g * 0.7));
+  pwm.setPWM(2, 0, 0xFFF - round( 0xFFF * b * 0.55));
 }
 
 void lcdPrintNumberPadded(int number, int len, char padding) {
@@ -647,7 +657,7 @@ void gInit()
   gAddSpacer(1);
 
   gAddMovingGraph("TQsize", 0, 2000, &tqSize, 10);
-//  gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
+  //  gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
 
   gAddMovingGraph("MILLIS/FRAME", 0, 100, &millisPerFrame, 10);
   gAddSpacer(1);
@@ -693,7 +703,6 @@ void gButtonPressed(int id, int value)
   }
   if (lightsensorButtonId == id && value > 0)
   {
-    setStatusMessage("measuring light");
     measureLight();
     gUpdateValue(&lightSensorR);
     gUpdateValue(&lightSensorG);
@@ -701,7 +710,6 @@ void gButtonPressed(int id, int value)
     gUpdateValue(&lightSensorC);
     gUpdateValue(&lightSensorLux);
     gUpdateValue(&lightSensorCt);
-    setStatusMessage("light measured", 5000);
   }
 }
 
@@ -745,9 +753,10 @@ void calibrateFaders() {
   statefulLCDclear();
 }
 void measureLight() {
-  statefulLCDclear(-2);
+/*  statefulLCDclear(-2);
   lcd.setCursor(2, 0);
   lcd.print("measuring light");
+*/
   lightSensor.getData();
   lightSensorR = lightSensor.r_comp;
   lightSensorG = lightSensor.g_comp;
@@ -755,7 +764,7 @@ void measureLight() {
   lightSensorC = lightSensor.c_comp;
   lightSensorLux = lightSensor.lux;
   lightSensorCt = lightSensor.ct;
-  statefulLCDclear();
+  //statefulLCDclear();
 }
 
 void statefulLCDclear(int theState) {
