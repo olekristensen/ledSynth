@@ -28,21 +28,28 @@ class Fader {
     Adafruit_DCMotor *_motor;
     Adafruit_ADS1115 *_ads;
     int _adsFaderPosChannel;
+    int _adsPotRangeTopChannel;
+    int _adsPotRangeBottomChannel;
     PID *_pid;
     long _millisLastFade = 0;
     double _setpoint = 0;
     double _pos = 0;
     double _speed = 0;
     double _outputLimit = 0;
+    
+    bool _useRanges = false;
 
     int16_t _faderAdsValue = 0;
     int16_t _faderCalibrationHigh = 17100;
     int16_t _faderCalibrationLow = 20;
 
+    int _potRangeTopAdsValue;
+    int _potRangeBottomAdsValue;
+    
+    int _potRangeTopValue;
+    int _potRangeBottomValue;
+    
     const int16_t faderPadding = 400;
-
-    double potRangeFrom;
-    double potIRangeTo;
 
     enum State { F_MANUAL, F_AUTOMATIC };
     int _state = F_AUTOMATIC;
@@ -51,11 +58,21 @@ class Fader {
       _motor = motor;
       _ads = ads;
       _adsFaderPosChannel = adsFaderPosChannel;
+      _adsPotRangeTopChannel = adsFaderPosChannel+1;
+      _adsPotRangeBottomChannel = adsFaderPosChannel+2;
       _setpoint = setpoint;
       _speed = spd;
       _pid = new PID(&_pos, &_speed, &_setpoint, pidP, pidI, pidD, DIRECT);
       _pid->SetSampleTime(sampleRate); // Sets the sample rate
       _pid->SetMode(AUTOMATIC);
+    }
+    
+    void setUseRanges(bool useRanges){
+      _useRanges = useRanges;
+    }
+
+    bool getUseRanges(){
+      return _useRanges;
     }
 
     void setSpeedLimits(double outputLimit) {
@@ -84,6 +101,9 @@ class Fader {
     }
 
     double getSetpoint() {
+      if(_useRanges)
+        return mapFloat(_setpoint, 0.0, 1023.0, _potRangeBottomValue*1.0, _potRangeTopValue * 1.0);
+      else
       return _setpoint;
     }
 
@@ -123,6 +143,10 @@ class Fader {
 
     void update() {
       _faderAdsValue = getAdsValue(_adsFaderPosChannel);
+      _potRangeTopAdsValue = getAdsValue(_adsPotRangeTopChannel);
+      _potRangeBottomAdsValue = getAdsValue(_adsPotRangeBottomChannel);
+      _potRangeTopValue = round(constrain(mapFloat(_potRangeTopAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0));
+      _potRangeBottomValue = round(constrain(mapFloat(_potRangeBottomAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0));
       _pos = constrain(mapFloat(_faderAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0);
       if (_state == F_AUTOMATIC) {
         if (_pid->Compute()) {

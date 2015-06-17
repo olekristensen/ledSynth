@@ -21,9 +21,8 @@
 */
 
 // TODO: Setup menu?
-// TODO: Range pots
-// TODO: Light sensor
-// TODO: DMX output
+// TODO: Connection and mixing
+// TODO: Light sensor calibration
 
 #include <Wire.h>                    // I2C
 #include <LiquidTWI.h>               // Display
@@ -53,6 +52,17 @@ const String identityString = "light node";
 const int versionMajor = 0;
 const int versionMinor = 5;
 int newID = 0;
+
+
+// CONNECTION
+
+int connectionChannelID = 0;
+const int maxChannelID = 9;
+
+
+// RANGES
+
+int useFaderRanges = 1;
 
 
 // QUAD ENCODER
@@ -130,11 +140,6 @@ Fader faderTemperature(
   &faderTemperaturePots, 0,
   faderPidP, faderPidI, faderPidD, faderPidSampleRate);
 int temperaturePercent;
-
-// MENU
-
-int connectionChannelID = 0;
-const int maxChannelID = 9;
 
 
 // LIGHT SENSOR
@@ -392,12 +397,16 @@ void loop() {
       statefulLCDclear();
       faderIntensity.setManual();
       faderTemperature.setManual();
+      faderIntensity.setUseRanges(useFaderRanges > 0);
+      faderTemperature.setUseRanges(useFaderRanges > 0);
       intensityPercent = faderIntensity.getSetpointPercent();
       temperaturePercent = faderTemperature.getSetpointPercent();
       state = S_STANDALONE_LOOP;
       break;
 
     case S_STANDALONE_LOOP  :
+      faderIntensity.setUseRanges(useFaderRanges > 0);
+      faderTemperature.setUseRanges(useFaderRanges > 0);
       faderIntensity.update();
       faderTemperature.update();
       intensityPercent = faderIntensity.getSetpointPercent();
@@ -429,7 +438,7 @@ void loop() {
       // millis per frame
       lcd.setCursor(0, 1);
       lcdPrintNumberPadded(thisFrameMillis - millisLastFrame, 2, ' ');
-      */
+      //*/
       break;
 
     case S_CONNECTED_SETUP :
@@ -444,6 +453,8 @@ void loop() {
         setDisplayColorRGB(iNorm * iNorm, 1.0, iNorm);
         delay(1);
       }
+      faderIntensity.setUseRanges(useFaderRanges > 0);
+      faderTemperature.setUseRanges(useFaderRanges > 0);
       intensityPercent = faderIntensity.getSetpointPercent();
       temperaturePercent = faderTemperature.getSetpointPercent();
       faderIntensity.setAutomatic();
@@ -474,9 +485,14 @@ void loop() {
       // faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
       faderIntensity.setSetpointNormalised(intensityPercent/100.0);
       faderTemperature.setSetpointNormalised(temperaturePercent/100.0);
-
+      faderIntensity.setUseRanges(useFaderRanges > 0);
+      faderTemperature.setUseRanges(useFaderRanges > 0);
       faderIntensity.update();
       faderTemperature.update();
+      
+      if(useFaderRanges > 0){
+        
+      }
 
       //intensityPercent = faderIntensity.getSetpointPercent();
       //temperaturePercent = faderTemperature.getSetpointPercent();
@@ -505,6 +521,10 @@ void loop() {
                            , 6, ' ');
       lcd.print("k");
 
+    gUpdateValue(&(faderIntensity._potRangeTopValue));
+    gUpdateValue(&(faderIntensity._potRangeBottomValue));
+    gUpdateValue(&(faderTemperature._potRangeTopValue));
+    gUpdateValue(&(faderTemperature._potRangeBottomValue));
 
       gUpdateValue(&millisPerFrame);
       //gUpdateValue(&batteryLevel);
@@ -597,6 +617,13 @@ void gInit()
   gAddSlider(0, 100, "intensity", &intensityPercent);
   gAddSlider(0, 100, "temperature", &temperaturePercent);
   calibrateButtonId = gAddButton("calibrate");
+  gAddLabel("RANGES", 2);
+  gAddSlider(0, 1023, "intensity top", &(faderIntensity._potRangeTopValue));
+  gAddSlider(0, 1023, "intensity bottom", &(faderIntensity._potRangeBottomValue));
+  gAddSlider(0, 1023, "temperature top", &(faderTemperature._potRangeTopValue));
+  gAddSlider(0, 1023, "temperature bottom", &(faderTemperature._potRangeBottomValue));
+  gAddToggle("USE RANGES", &useFaderRanges);
+
   gAddSpacer(1);
   if (lightSensorOnline) {
     gAddLabel("SENSOR", 2);
@@ -622,7 +649,7 @@ void gInit()
   gAddMovingGraph("TQsize", 0, 2000, &tqSize, 10);
 //  gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
 
-  gAddMovingGraph("MILLIS/FRAME", 0, 50, &millisPerFrame, 10);
+  gAddMovingGraph("MILLIS/FRAME", 0, 100, &millisPerFrame, 10);
   gAddSpacer(1);
 
   statusMessageLabelId = gAddLabel("connecting", 2);
