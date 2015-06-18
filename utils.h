@@ -39,3 +39,8 @@ int numDigits(int number)
 }
 
 double lerp(double a, double b, double t){ return a + t * (b - a); }
+
+void createChar(LiquidTWI &display, uint8_t location, const uint8_t charmap[]) {
+  display.createChar(location, (uint8_t*) charmap);
+}
+

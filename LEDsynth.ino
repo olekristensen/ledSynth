@@ -20,8 +20,6 @@
     olek@itu.dk
 */
 
-// TODO: Display color crash
-
 // TODO: Setup menu?
 // TODO: Connection and mixing
 // TODO: Light sensor calibration
@@ -52,7 +50,7 @@
 
 const String identityString = "light node";
 const int versionMajor = 0;
-const int versionMinor = 5;
+const int versionMinor = 6;
 int newID = 0;
 
 
@@ -60,6 +58,86 @@ int newID = 0;
 
 int connectionChannelID = 0;
 const int maxChannelID = 9;
+int connectionMixLevel = 0;
+int mixLevelDisplayChars = 12;
+int connectionMixMax = 5 * mixLevelDisplayChars;
+bool showMixLevel = true;
+
+const byte lcdCharBarGraph0[8] = {
+  B00000,
+  B11111,
+  B00000,
+  B00000,
+  B00000,
+  B11111,
+  B00000
+};
+const byte lcdCharBarGraph1[8] = {
+  B00000,
+  B11111,
+  B10000,
+  B10000,
+  B10000,
+  B11111,
+  B00000
+};
+const byte lcdCharBarGraph2[8] = {
+  B00000,
+  B11111,
+  B11000,
+  B11000,
+  B11000,
+  B11111,
+  B00000
+};
+const byte lcdCharBarGraph3[8] = {
+  B00000,
+  B11111,
+  B11100,
+  B11100,
+  B11100,
+  B11111,
+  B00000
+};
+const byte lcdCharBarGraph4[8] = {
+  B00000,
+  B11111,
+  B11110,
+  B11110,
+  B11110,
+  B11111,
+  B00000
+};
+const byte lcdCharBarGraph5[8] = {
+  B00000,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B00000
+};
+const byte lcdCharBarGraphStart[8] = {
+  B00000,
+  B00001,
+  B00001,
+  B00001,
+  B00001,
+  B00001,
+  B00000
+};
+const byte lcdCharBarGraphEnd[8] = {
+  B00000,
+  B10000,
+  B10000,
+  B10000,
+  B10000,
+  B10000,
+  B00000
+};
+
+const byte * lcdCharBarGraphs[8] = {lcdCharBarGraph0, lcdCharBarGraph1, lcdCharBarGraph2, lcdCharBarGraph3, lcdCharBarGraph4, lcdCharBarGraph5, lcdCharBarGraphStart, lcdCharBarGraphEnd };
+
 
 
 // RANGES
@@ -73,13 +151,14 @@ const int quadButtonPin = 2;
 const int quadPhasePinA = 3;
 const int quadPhasePinB = 4;
 const int quadPhasesPerTick = 4;
-static volatile int woke;
+long millisLastQuad = 0;
+static volatile int quadButtonPushes;
 int quadPos = 0;
 qdec quad(quadPhasePinA, quadPhasePinB);
 
 int quadButtonCallback(uint32_t ulPin)
 {
-  woke++;
+  quadButtonPushes++;
   return 0;  // don't exit RFduino_ULPDelay
 }
 
@@ -88,18 +167,18 @@ int quadButtonCallback(uint32_t ulPin)
 
 LiquidTWI lcd(0); // I2C 0x20
 
-byte lcdCharBluetooth[8] = {0x4, 0x16, 0xd, 0x6, 0xd, 0x16, 0x4};
-byte lcdCharFat1[8] = {0x2, 0x6, 0xe, 0x6, 0x6, 0x6, 0x6};
-byte lcdCharFat2[8] = {0xe, 0x1b, 0x3, 0x6, 0xc, 0x18, 0x1f};
-byte lcdCharFat3[8] = {0xe, 0x1b, 0x3, 0xe, 0x3, 0x1b, 0xe};
-byte lcdCharFat4[8] = {0x3, 0x7, 0xf, 0x1b, 0x1f, 0x3, 0x3};
-byte lcdCharFat5[8] = {0x1f, 0x18, 0x1e, 0x3, 0x3, 0x1b, 0xe};
-byte lcdCharFat6[8] = {0xe, 0x1b, 0x18, 0x1e, 0x1b, 0x1b, 0xe};
-byte lcdCharFat7[8] = {0x1f, 0x3, 0x6, 0xc, 0xc, 0xc, 0xc};
-byte lcdCharFat8[8] = {0xe, 0x1b, 0x1b, 0xe, 0x1b, 0x1b, 0xe};
-byte lcdCharFat9[8] = {0xe, 0x1b, 0x1b, 0xf, 0x3, 0x1b, 0xe};
-byte lcdCharFat0[8] = {0xe, 0x1b, 0x1b, 0x1b, 0x1b, 0x1b, 0xe};
-byte * lcdCharNumbers[10] = {lcdCharFat0, lcdCharFat1, lcdCharFat2, lcdCharFat3, lcdCharFat4, lcdCharFat5, lcdCharFat6, lcdCharFat7, lcdCharFat8, lcdCharFat9 };
+const byte lcdCharBluetooth[8] = {0x4, 0x16, 0xd, 0x6, 0xd, 0x16, 0x4};
+const byte lcdCharFat1[8] = {0x2, 0x6, 0xe, 0x6, 0x6, 0x6, 0x6};
+const byte lcdCharFat2[8] = {0xe, 0x1b, 0x3, 0x6, 0xc, 0x18, 0x1f};
+const byte lcdCharFat3[8] = {0xe, 0x1b, 0x3, 0xe, 0x3, 0x1b, 0xe};
+const byte lcdCharFat4[8] = {0x3, 0x7, 0xf, 0x1b, 0x1f, 0x3, 0x3};
+const byte lcdCharFat5[8] = {0x1f, 0x18, 0x1e, 0x3, 0x3, 0x1b, 0xe};
+const byte lcdCharFat6[8] = {0xe, 0x1b, 0x18, 0x1e, 0x1b, 0x1b, 0xe};
+const byte lcdCharFat7[8] = {0x1f, 0x3, 0x6, 0xc, 0xc, 0xc, 0xc};
+const byte lcdCharFat8[8] = {0xe, 0x1b, 0x1b, 0xe, 0x1b, 0x1b, 0xe};
+const byte lcdCharFat9[8] = {0xe, 0x1b, 0x1b, 0xf, 0x3, 0x1b, 0xe};
+const byte lcdCharFat0[8] = {0xe, 0x1b, 0x1b, 0x1b, 0x1b, 0x1b, 0xe};
+const byte * lcdCharNumbers[10] = {lcdCharFat0, lcdCharFat1, lcdCharFat2, lcdCharFat3, lcdCharFat4, lcdCharFat5, lcdCharFat6, lcdCharFat7, lcdCharFat8, lcdCharFat9 };
 
 double displayRed = 1.0;
 double displayGreen = 1.0;
@@ -107,16 +186,16 @@ double displayBlue = 1.0;
 
 // BATTERY
 
-byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
-byte lcdCharBatteryLevel5[8] = {0x6, 0x9, 0xf, 0xf, 0xf, 0xf, 0xf};
-byte lcdCharBatteryLevel4[8] = {0x6, 0x9, 0x9, 0xf, 0xf, 0xf, 0xf};
-byte lcdCharBatteryLevel3[8] = {0x6, 0x9, 0x9, 0x9, 0xf, 0xf, 0xf};
-byte lcdCharBatteryLevel2[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0xf, 0xf};
-byte lcdCharBatteryLevel1[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
-byte lcdCharBatteryLevel0[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
-byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLevel1, lcdCharBatteryLevel2, lcdCharBatteryLevel3, lcdCharBatteryLevel4, lcdCharBatteryLevel5, lcdCharBatteryLevel6 };
+const byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
+const byte lcdCharBatteryLevel5[8] = {0x6, 0x9, 0xf, 0xf, 0xf, 0xf, 0xf};
+const byte lcdCharBatteryLevel4[8] = {0x6, 0x9, 0x9, 0xf, 0xf, 0xf, 0xf};
+const byte lcdCharBatteryLevel3[8] = {0x6, 0x9, 0x9, 0x9, 0xf, 0xf, 0xf};
+const byte lcdCharBatteryLevel2[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0xf, 0xf};
+const byte lcdCharBatteryLevel1[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
+const byte lcdCharBatteryLevel0[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
+const byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLevel1, lcdCharBatteryLevel2, lcdCharBatteryLevel3, lcdCharBatteryLevel4, lcdCharBatteryLevel5, lcdCharBatteryLevel6 };
 
-int batteryLevels = 7;
+const int batteryLevels = 7;
 int batteryLevel = 0;
 float batteryLevelSmoothNormalised = 0.0;
 
@@ -173,7 +252,7 @@ i2cDmx dmx;        //I2C 0x64
 // BLUETOOTH
 
 bool bleAdvertising = false;
-TinyQueue<char> tq(20 * 100);
+TinyQueue<char> tq(20 * 10);
 long millisLastCommand = 0;
 int tqSize = 0;
 
@@ -186,6 +265,7 @@ int statusMessageLabelId = 0;
 int lightsensorButtonId = 0;
 int idSliderId = 0;
 int connectionChannelIdSliderId = 0;
+int connectionMixLevelSliderId = 0;
 String statusMessage = "";
 long statusMessageMillisToClear = -1;
 bool statusMessageCleared = false;
@@ -229,7 +309,6 @@ void setup() {
 
   pinMode(1, INPUT);
 
-
   lightSensorOnline = lightSensor.begin();
   if (lightSensorOnline) lightSensor.getData();
 
@@ -255,7 +334,7 @@ void setup() {
   newID = conf->id;
 
   pinMode(quadButtonPin, INPUT_PULLUP);
-  RFduino_pinWakeCallback(2, LOW, quadButtonCallback);
+  RFduino_pinWakeCallback(quadButtonPin, LOW, quadButtonCallback);
 
   if (DEBUG_V == 1) {
     //Print unit info on serial
@@ -268,8 +347,13 @@ void setup() {
     Serial.println(versionMinor);
   }
 
-  lcd.createChar(0, lcdCharBluetooth);   //Bluetooth Icon
-  lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
+  createChar(lcd, 0, lcdCharBluetooth);   //Bluetooth Icon
+  createChar(lcd, 1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
+  createChar(lcd, 2, lcdCharBatteryLevels[batteryLevel]);
+  createChar(lcd, 3, lcdCharBarGraphs[6]);
+  createChar(lcd, 4, lcdCharBarGraphs[7]);
+  createChar(lcd, 5, lcdCharBarGraphs[0]);
+  createChar(lcd, 6, lcdCharBarGraphs[5]);
 
   //Start BLE Advertisement
   RFduinoBLE.advertisementInterval = 200;
@@ -291,13 +375,64 @@ void setup() {
   // FIXTURES
 
   dmx.addFixture(new TVL2000());
+
   dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+  dmx.addFixture(new DmxFixtureIT8bit());
+
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
   dmx.addFixture(new DmxFixtureTI8bit());
 
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+  dmx.addFixture(new DmxFixtureTI8bit());
+
+  createChar(lcd, 7, lcdCharBarGraphs[connectionMixLevel % 5]);
+
 }
-
-
-
 
 void loop() {
   long thisFrameMillis = millis();
@@ -397,7 +532,7 @@ void loop() {
         double iNorm = i * 1.0 / fadeSteps * 1.0;
         iNorm = 0.5 + (sin(2.0 * (iNorm + 0.25) * PI) / 2.0);
         // yellow flash
-        setDisplayColorRGB(displayRed, iNorm*displayGreen, iNorm * iNorm * displayBlue);
+        setDisplayColorRGB(displayRed, iNorm * displayGreen, iNorm * iNorm * displayBlue);
         delay(1);
       }
       statefulLCDclear();
@@ -423,14 +558,14 @@ void loop() {
       dmx.setIntensity(faderIntensity.getSetpointNormalised());
       dmx.sendDmx();
       // Display
-      lcd.setCursor(15, 0);
+      lcd.setCursor(15, 1);
       if (thisFrameMillis % 2000 < 800 && thisFrameMillis % 400 < 200 ) {
         lcd.write(byte(0));
       } else {
         lcd.print(" ");
       }
-      lcd.setCursor(0, 1);
-      lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 5, ' ');
+      lcd.setCursor(1, 1);
+      lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 4, ' ');
       lcd.print("%");
       /* temperature percent
       lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
@@ -452,7 +587,7 @@ void loop() {
 
     case S_CONNECTED_SETUP :
       statefulLCDclear();
-      lcd.setCursor(15, 0);
+      lcd.setCursor(15, 1);
       lcd.write(byte(0)); // bluetooth icon
       quadPos = 0;
       for (int i = 0; i < fadeSteps; i++) {
@@ -474,16 +609,62 @@ void loop() {
 
     case S_CONNECTED_LOOP  :
       quadPos += quad.readDelta();
-      if (quadPos != 0 && quadPos % quadPhasesPerTick == 0) {
-        connectionChannelID = max(0, min(maxChannelID, connectionChannelID + (quadPos / quadPhasesPerTick)));
-        gUpdateValue(&connectionChannelID);
+      if (quadButtonPushes > 0) {
+        //TODO: Debouncing
+        showMixLevel = !showMixLevel;
+        if (!showMixLevel) millisLastQuad = thisFrameMillis;
+        quadButtonPushes = 0;
+      }
+      if (abs(quadPos) >= quadPhasesPerTick) {
+        if (showMixLevel) {
+          connectionMixLevel = max(0, min(connectionMixLevel + ((quadPos / quadPhasesPerTick)), connectionMixMax));
+          createChar(lcd, 7, lcdCharBarGraphs[connectionMixLevel % 5]);
+          gUpdateValue(&connectionMixLevel);
+        } else {
+          connectionChannelID = max(0, min(maxChannelID, connectionChannelID + (quadPos / quadPhasesPerTick)));
+          gUpdateValue(&connectionChannelID);
+          if (connectionChannelID == conf->id) {
+            faderIntensity.setManual();
+            faderTemperature.setManual();
+          } else {
+            faderIntensity.setAutomatic();
+            faderTemperature.setAutomatic();
+          }
+          millisLastQuad = thisFrameMillis;
+        }
         quadPos = 0;
       }
-      lcd.setCursor(0, 1);
-      if (connectionChannelID != 0) {
-        lcd.print(connectionChannelID);
+      if (millisLastQuad > thisFrameMillis - 2000 && !showMixLevel) {
+        lcd.setCursor(1, 0);
+        if (connectionChannelID == 0) {
+          lcd.print(" uses sensor  S");
+        } else if (connectionChannelID == conf->id) {
+          lcd.print(" is manual    M");
+        } else {
+          lcd.print(" connected to ");
+          lcd.print(connectionChannelID);
+        }
       } else {
-        lcd.print(" ");
+        if (!showMixLevel) showMixLevel = true;
+        lcd.setCursor(1, 0);
+        if (connectionChannelID == conf->id) {
+          lcd.print("              M");
+        } else {
+          lcd.write(byte(3));
+          for (int i = 0; i < connectionMixLevel / 5; i++)
+            lcd.write(byte(6));
+          if (connectionMixLevel < connectionMixMax) {
+            lcd.write(byte(7));
+            for (int i = (connectionMixLevel / 5); i < (connectionMixMax / 5) - 1; i++)
+              lcd.write(byte(5));
+          }
+          lcd.write(byte(4));
+          if (connectionChannelID == 0) {
+            lcd.print('S');
+          } else {
+            lcd.print(connectionChannelID);
+          }
+        }
       }
 
       if (guino_update()) {
@@ -492,22 +673,27 @@ void loop() {
       // smoothing?
       // faderIntensity.setSetpointNormalised((0.2 * intensityPercent / 100.0) + (0.8 * faderIntensity.getSetpointNormalised()) );
       // faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
-      faderIntensity.setSetpointNormalised(intensityPercent / 100.0);
-      faderTemperature.setSetpointNormalised(temperaturePercent / 100.0);
+      if (connectionChannelID != conf->id) {
+        faderIntensity.setSetpointNormalised(intensityPercent / 100.0);
+        faderTemperature.setSetpointNormalised(temperaturePercent / 100.0);
+      }
       faderIntensity.setUseRanges(useFaderRanges > 0);
       faderTemperature.setUseRanges(useFaderRanges > 0);
       faderIntensity.update();
       faderTemperature.update();
       temperatureKelvin = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ));
-
-      //intensityPercent = faderIntensity.getSetpointPercent();
-      //temperaturePercent = faderTemperature.getSetpointPercent();
+      if (connectionChannelID == conf->id) {
+        intensityPercent = faderIntensity.getSetpointPercent();
+        temperaturePercent = faderTemperature.getSetpointPercent();
+        gUpdateValue(&intensityPercent);
+        gUpdateValue(&temperaturePercent);
+      }
       dmx.setTemperatureKelvin(temperatureKelvin);
       dmx.setIntensity(faderIntensity.getSetpointNormalised());
       dmx.sendDmx();
 
       // Display
-      lcd.setCursor(15, 0);
+      lcd.setCursor(15, 1);
       if (thisFrameMillis > millisLastCommand - 5) {
         lcd.write(byte(0));
       } else {
@@ -556,10 +742,10 @@ void loop() {
     int newBatteryLevel = round(batteryLevelSmoothNormalised * (batteryLevels - 1));
     if (newBatteryLevel != batteryLevel) {
       batteryLevel = newBatteryLevel;
-      lcd.createChar(3, lcdCharBatteryLevels[batteryLevel]);
+      createChar(lcd, 2, lcdCharBatteryLevels[batteryLevel]);
     }
-    lcd.setCursor(15, 1);
-    lcd.write(byte(3));
+    lcd.setCursor(0, 1);
+    lcd.write(byte(2));
   }
 
   frameCount++;
@@ -649,6 +835,10 @@ void gInit()
   }
   gAddSpacer(1);
 
+  gAddLabel("MIXER", 2);
+  connectionMixLevelSliderId = gAddSlider(0, connectionMixMax, "mixer", &connectionMixLevel);
+  gAddSpacer(1);
+
 
   gAddLabel("IDENTITY", 2);
   idSliderId = gAddSlider(0, maxChannelID, "ID", &newID);
@@ -656,7 +846,7 @@ void gInit()
   connectionChannelIdSliderId = gAddSlider(0, maxChannelID, "CHANNEL", &connectionChannelID);
   gAddSpacer(1);
 
-  gAddMovingGraph("TQsize", 0, 2000, &tqSize, 10);
+  gAddMovingGraph("TQsize", 0, tq.buffersize(), &tqSize, 10);
   //  gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
 
   gAddMovingGraph("MILLIS/FRAME", 0, 100, &millisPerFrame, 10);
@@ -711,10 +901,25 @@ void gButtonPressed(int id, int value)
     gUpdateValue(&lightSensorLux);
     gUpdateValue(&lightSensorCt);
   }
+
 }
 
 void gItemUpdated(int id)
 {
+  if (connectionChannelIdSliderId == id) {
+    if (connectionChannelID == conf->id) {
+      faderIntensity.setManual();
+      faderTemperature.setManual();
+    } else {
+      faderIntensity.setAutomatic();
+      faderTemperature.setAutomatic();
+    }
+  }
+
+  if (connectionMixLevelSliderId == id) {
+    createChar(lcd, 7, lcdCharBarGraphs[connectionMixLevel % 5]);
+  }
+
   /*  if(idSliderId == id){
       gUpdateLabel(saveConfigButtonId, "save id");
     }
@@ -742,7 +947,7 @@ void saveConf(int id) {
       DEBUG_PRINT("CONF: Saved new id");
       debug_conf( conf );
     }
-    lcd.createChar(1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
+    createChar(lcd, 1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
   }
 }
 
@@ -753,10 +958,10 @@ void calibrateFaders() {
   statefulLCDclear();
 }
 void measureLight() {
-/*  statefulLCDclear(-2);
-  lcd.setCursor(2, 0);
-  lcd.print("measuring light");
-*/
+  /*  statefulLCDclear(-2);
+    lcd.setCursor(2, 0);
+    lcd.print("measuring light");
+  */
   lightSensor.getData();
   lightSensorR = lightSensor.r_comp;
   lightSensorG = lightSensor.g_comp;
@@ -816,9 +1021,10 @@ void statefulLCDclear(int theState) {
       break;
 
     case S_CONNECTED_SETUP :
-    case S_CONNECTED_LOOP  :
       lcd.setCursor(2, 0);
       lcd.print("connected");
+    case S_CONNECTED_LOOP  :
+      lcd.setCursor(2, 0);
       break;
     default  :
       break;

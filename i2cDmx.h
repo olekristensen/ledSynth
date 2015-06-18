@@ -31,10 +31,10 @@ class DmxFixture {
       _kelvinHigh = kelvinHigh;
       _channelCount = channelCount;
     };
-    virtual int setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin);
-    int _kelvinLow;
-    int _kelvinHigh;
-    int _channelCount;
+    virtual uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin);
+    unsigned int _kelvinLow;
+    unsigned int _kelvinHigh;
+    uint8_t _channelCount;
     DmxFixture * next;
 };
 
@@ -43,9 +43,9 @@ class DmxFixtureCWVW8bit : public DmxFixture {
     DmxFixtureCWVW8bit(int kelvinLow = 2700, int kelvinHigh = 6500, int channelCount = 2) : DmxFixture(kelvinLow, kelvinHigh, channelCount) {
       ;
     }
-    float gamma = 1.2;
+    const static float gamma = 1.2;
     float invGamma = 1.0/gamma;
-    int setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
+    uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
       float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
       data[startChannel] = byte(pow(temperatureNormalisedInRange, invGamma) * normalisedIntensity * 255);
       data[startChannel + 1] = byte(pow((1.0 - temperatureNormalisedInRange), invGamma) * normalisedIntensity * 255);
@@ -58,7 +58,7 @@ class DmxFixtureIT8bit : public DmxFixture {
     DmxFixtureIT8bit(int kelvinLow = 2700, int kelvinHigh = 6500, int channelCount = 2) : DmxFixture(kelvinLow, kelvinHigh, channelCount) {
       ;
     }
-    int setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
+    uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
       float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
       data[startChannel] = byte(normalisedIntensity * 255);
       data[startChannel + 1] = byte(temperatureNormalisedInRange * 255);
@@ -72,7 +72,7 @@ class DmxFixtureTI8bit : public DmxFixture {
     DmxFixtureTI8bit(int kelvinLow = 2700, int kelvinHigh = 6500, int channelCount = 2) : DmxFixture(kelvinLow, kelvinHigh, channelCount) {
       ;
     }
-    int setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
+    uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
       float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
       data[startChannel] = byte(temperatureNormalisedInRange * 255);
       data[startChannel + 1] = byte(normalisedIntensity * 255);
@@ -152,11 +152,11 @@ class i2cDmx {
       }
     };
     
-    int getKelvinLow(){
+    unsigned int getKelvinLow(){
       return _kelvinLow;
     }
 
-    int getKelvinHigh(){
+    unsigned int getKelvinHigh(){
       return _kelvinHigh;
     }
 
