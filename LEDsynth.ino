@@ -22,13 +22,15 @@
 
 // TODO: Setup menu?
 // TODO: Connection and mixing
+// TODO: - Seperate remote and fader components
+// TODO: - Generate seperate output with possibility of remote override, before writing to dmx
 // TODO: Light sensor calibration
 
 #include <Wire.h>                    // I2C
 #include <LiquidTWI.h>               // Display
 #include <Adafruit_ADS1015.h>        // Analog Digital Converter
 #include <Adafruit_MotorShield.h>    // Motor Shield
-#include <Adafruit_TCS34725.h>       // Light Sensor base
+#include <Adafruit_TCS34725.h>       // Light Sensor base class
 #include "tcs34725.h"                // Light Sensor autoranging
 #include <RFduinoBLE.h>              // RFduino BLE
 #include <String.h>                  // Text manipulation
@@ -54,14 +56,21 @@ const int versionMinor = 6;
 int newID = 0;
 
 
-// CONNECTION
+// REMOTE
 
-int connectionChannelID = 0;
-const int maxChannelID = 9;
-int connectionMixLevel = 0;
+int remoteChannel = 0;
+const int maxRemoteChannels = 9;
+int remoteMixLevel = 0;
+bool mixLevelShown = true;
 int mixLevelDisplayChars = 12;
-int connectionMixMax = 5 * mixLevelDisplayChars;
-bool showMixLevel = true;
+int remoteMixMax = 5 * mixLevelDisplayChars;
+int useFaderRanges = 1;
+
+int intensityRemote;
+int temperatureRemote;
+int intensityOutput;
+int temperatureOutput;
+
 
 const byte lcdCharBarGraph0[8] = {
   B00000,
@@ -139,19 +148,14 @@ const byte lcdCharBarGraphEnd[8] = {
 const byte * lcdCharBarGraphs[8] = {lcdCharBarGraph0, lcdCharBarGraph1, lcdCharBarGraph2, lcdCharBarGraph3, lcdCharBarGraph4, lcdCharBarGraph5, lcdCharBarGraphStart, lcdCharBarGraphEnd };
 
 
-
-// RANGES
-
-int useFaderRanges = 1;
-
-
 // QUAD ENCODER
 
 const int quadButtonPin = 2;
 const int quadPhasePinA = 3;
 const int quadPhasePinB = 4;
 const int quadPhasesPerTick = 4;
-long millisLastQuad = 0;
+long quadLastTickMillis = 0;
+long quadLastClickMillis = 0;
 static volatile int quadButtonPushes;
 int quadPos = 0;
 qdec quad(quadPhasePinA, quadPhasePinB);
@@ -264,8 +268,8 @@ int calibrateButtonId = 0;
 int statusMessageLabelId = 0;
 int lightsensorButtonId = 0;
 int idSliderId = 0;
-int connectionChannelIdSliderId = 0;
-int connectionMixLevelSliderId = 0;
+int remoteChannelSliderId = 0;
+int remoteMixLevelSliderId = 0;
 String statusMessage = "";
 long statusMessageMillisToClear = -1;
 bool statusMessageCleared = false;
@@ -430,7 +434,7 @@ void setup() {
   dmx.addFixture(new DmxFixtureTI8bit());
   dmx.addFixture(new DmxFixtureTI8bit());
 
-  createChar(lcd, 7, lcdCharBarGraphs[connectionMixLevel % 5]);
+  createChar(lcd, 7, lcdCharBarGraphs[remoteMixLevel % 5]);
 
 }
 
@@ -572,7 +576,7 @@ void loop() {
       lcd.print("%");
       */
       // temperature kelvin
-      lcdPrintNumberPadded(temperatureKelvin, 6, ' ');
+      lcdPrintNumberPadded(temperatureKelvin, 7, ' ');
       lcd.print("k");
 
       temperatureToColor(temperatureKelvin, displayRed, displayGreen, displayBlue);
@@ -610,59 +614,61 @@ void loop() {
     case S_CONNECTED_LOOP  :
       quadPos += quad.readDelta();
       if (quadButtonPushes > 0) {
-        //TODO: Debouncing
-        showMixLevel = !showMixLevel;
-        if (!showMixLevel) millisLastQuad = thisFrameMillis;
+        if (thisFrameMillis - quadLastClickMillis > 400) {
+          mixLevelShown = !mixLevelShown;
+          quadLastClickMillis = thisFrameMillis;
+        }
+        if (!mixLevelShown) quadLastTickMillis = thisFrameMillis;
         quadButtonPushes = 0;
       }
       if (abs(quadPos) >= quadPhasesPerTick) {
-        if (showMixLevel) {
-          connectionMixLevel = max(0, min(connectionMixLevel + ((quadPos / quadPhasesPerTick)), connectionMixMax));
-          createChar(lcd, 7, lcdCharBarGraphs[connectionMixLevel % 5]);
-          gUpdateValue(&connectionMixLevel);
+        if (mixLevelShown) {
+          remoteMixLevel = max(0, min(remoteMixLevel + ((quadPos / quadPhasesPerTick)), remoteMixMax));
+          createChar(lcd, 7, lcdCharBarGraphs[remoteMixLevel % 5]);
+          gUpdateValue(&remoteMixLevel);
         } else {
-          connectionChannelID = max(0, min(maxChannelID, connectionChannelID + (quadPos / quadPhasesPerTick)));
-          gUpdateValue(&connectionChannelID);
-          if (connectionChannelID == conf->id) {
+          remoteChannel = max(0, min(maxRemoteChannels, remoteChannel + (quadPos / quadPhasesPerTick)));
+          gUpdateValue(&remoteChannel);
+          if (remoteChannel == conf->id) {
             faderIntensity.setManual();
             faderTemperature.setManual();
           } else {
             faderIntensity.setAutomatic();
             faderTemperature.setAutomatic();
           }
-          millisLastQuad = thisFrameMillis;
+          quadLastTickMillis = thisFrameMillis;
         }
         quadPos = 0;
       }
-      if (millisLastQuad > thisFrameMillis - 2000 && !showMixLevel) {
+      if (quadLastTickMillis > thisFrameMillis - 4000 && !mixLevelShown) {
         lcd.setCursor(1, 0);
-        if (connectionChannelID == 0) {
+        if (remoteChannel == 0) {
           lcd.print(" uses sensor  S");
-        } else if (connectionChannelID == conf->id) {
+        } else if (remoteChannel == conf->id) {
           lcd.print(" is manual    M");
         } else {
           lcd.print(" connected to ");
-          lcd.print(connectionChannelID);
+          lcd.print(remoteChannel);
         }
       } else {
-        if (!showMixLevel) showMixLevel = true;
+        if (!mixLevelShown) mixLevelShown = true;
         lcd.setCursor(1, 0);
-        if (connectionChannelID == conf->id) {
+        if (remoteChannel == conf->id) {
           lcd.print("              M");
         } else {
           lcd.write(byte(3));
-          for (int i = 0; i < connectionMixLevel / 5; i++)
+          for (int i = 0; i < remoteMixLevel / 5; i++)
             lcd.write(byte(6));
-          if (connectionMixLevel < connectionMixMax) {
+          if (remoteMixLevel < remoteMixMax) {
             lcd.write(byte(7));
-            for (int i = (connectionMixLevel / 5); i < (connectionMixMax / 5) - 1; i++)
+            for (int i = (remoteMixLevel / 5); i < (remoteMixMax / 5) - 1; i++)
               lcd.write(byte(5));
           }
           lcd.write(byte(4));
-          if (connectionChannelID == 0) {
+          if (remoteChannel == 0) {
             lcd.print('S');
           } else {
-            lcd.print(connectionChannelID);
+            lcd.print(remoteChannel);
           }
         }
       }
@@ -673,7 +679,7 @@ void loop() {
       // smoothing?
       // faderIntensity.setSetpointNormalised((0.2 * intensityPercent / 100.0) + (0.8 * faderIntensity.getSetpointNormalised()) );
       // faderTemperature.setSetpointNormalised((0.2 * temperaturePercent / 100.0) + (0.8 * faderTemperature.getSetpointNormalised()) );
-      if (connectionChannelID != conf->id) {
+      if (remoteChannel != conf->id) {
         faderIntensity.setSetpointNormalised(intensityPercent / 100.0);
         faderTemperature.setSetpointNormalised(temperaturePercent / 100.0);
       }
@@ -682,7 +688,7 @@ void loop() {
       faderIntensity.update();
       faderTemperature.update();
       temperatureKelvin = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * dmx.getKelvinLow(), 1.0 * dmx.getKelvinHigh() ));
-      if (connectionChannelID == conf->id) {
+      if (remoteChannel == conf->id) {
         intensityPercent = faderIntensity.getSetpointPercent();
         temperaturePercent = faderTemperature.getSetpointPercent();
         gUpdateValue(&intensityPercent);
@@ -693,23 +699,38 @@ void loop() {
       dmx.sendDmx();
 
       // Display
+
       lcd.setCursor(15, 1);
       if (thisFrameMillis > millisLastCommand - 5) {
-        lcd.write(byte(0));
+        lcd.write(byte(0)); // bluetooth icon
       } else {
         lcd.print(" ");
       }
 
-      lcd.setCursor(2, 1);
+      lcd.setCursor(1, 1);
+      if (faderIntensity._useRanges && faderIntensity._potRangeTopValue < 1023)
+        lcd.write(byte(3)); // truncated range
+      else
+        lcd.print(" ");
       lcdPrintNumberPadded(faderIntensity.getSetpointNormalised() * 100, 3, ' ');
       lcd.print("%");
-      /* temperature percent
-      lcdPrintNumberPadded(faderTemperature.getSetpointNormalised() * 100, 6, ' ');
-      lcd.print("%");
-      */
-      // temperature kelvin
-      lcdPrintNumberPadded(temperatureKelvin, 6, ' ');
+      if (faderIntensity._useRanges && faderIntensity._potRangeBottomValue > 0)
+        lcd.write(byte(4)); // truncated range
+      else
+        lcd.print(" ");
+
+      lcd.setCursor(8, 1);
+      if (faderTemperature._useRanges && faderTemperature._potRangeTopValue < 1023)
+        lcd.write(byte(3)); // truncated range
+      else
+        lcd.print(" ");
+
+      lcdPrintNumberPadded(temperatureKelvin, 4, ' ');
       lcd.print("k");
+      if (faderTemperature._useRanges && faderTemperature._potRangeBottomValue > 0)
+        lcd.write(byte(4)); // truncated range
+      else
+        lcd.print(" ");
 
       temperatureToColor(temperatureKelvin, displayRed, displayGreen, displayBlue);
       setDisplayColorRGB(displayRed, displayGreen, displayBlue);
@@ -836,14 +857,14 @@ void gInit()
   gAddSpacer(1);
 
   gAddLabel("MIXER", 2);
-  connectionMixLevelSliderId = gAddSlider(0, connectionMixMax, "mixer", &connectionMixLevel);
+  remoteMixLevelSliderId = gAddSlider(0, remoteMixMax, "mixer", &remoteMixLevel);
   gAddSpacer(1);
 
 
   gAddLabel("IDENTITY", 2);
-  idSliderId = gAddSlider(0, maxChannelID, "ID", &newID);
+  idSliderId = gAddSlider(0, maxRemoteChannels, "ID", &newID);
   saveConfigButtonId = gAddButton("save id");
-  connectionChannelIdSliderId = gAddSlider(0, maxChannelID, "CHANNEL", &connectionChannelID);
+  remoteChannelSliderId = gAddSlider(0, maxRemoteChannels, "CHANNEL", &remoteChannel);
   gAddSpacer(1);
 
   gAddMovingGraph("TQsize", 0, tq.buffersize(), &tqSize, 10);
@@ -906,8 +927,8 @@ void gButtonPressed(int id, int value)
 
 void gItemUpdated(int id)
 {
-  if (connectionChannelIdSliderId == id) {
-    if (connectionChannelID == conf->id) {
+  if (remoteChannelSliderId == id) {
+    if (remoteChannel == conf->id) {
       faderIntensity.setManual();
       faderTemperature.setManual();
     } else {
@@ -916,8 +937,8 @@ void gItemUpdated(int id)
     }
   }
 
-  if (connectionMixLevelSliderId == id) {
-    createChar(lcd, 7, lcdCharBarGraphs[connectionMixLevel % 5]);
+  if (remoteMixLevelSliderId == id) {
+    createChar(lcd, 7, lcdCharBarGraphs[remoteMixLevel % 5]);
   }
 
   /*  if(idSliderId == id){
