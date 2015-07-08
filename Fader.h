@@ -1,4 +1,4 @@
-/*  
+/*
     This file is part of LEDsynth
     LEDsynth - a dmx controller for control praradigm experiments with LED fixtures.
     Copyright (C) 2015  Ole Kristensen
@@ -36,8 +36,9 @@ class Fader {
     double _pos = 0;
     double _speed = 0;
     double _outputLimit = 0;
-    
+
     bool _useRanges = false;
+    bool _wasMoved = false;
 
     int16_t _faderAdsValue = 0;
     int16_t _faderCalibrationHigh = 17100;
@@ -45,10 +46,10 @@ class Fader {
 
     int _potRangeTopAdsValue;
     int _potRangeBottomAdsValue;
-    
+
     int _potRangeTopValue;
     int _potRangeBottomValue;
-    
+
     const int16_t faderPadding = 400;
 
     enum State { F_MANUAL, F_AUTOMATIC };
@@ -58,20 +59,20 @@ class Fader {
       _motor = motor;
       _ads = ads;
       _adsFaderPosChannel = adsFaderPosChannel;
-      _adsPotRangeTopChannel = adsFaderPosChannel+1;
-      _adsPotRangeBottomChannel = adsFaderPosChannel+2;
+      _adsPotRangeTopChannel = adsFaderPosChannel + 1;
+      _adsPotRangeBottomChannel = adsFaderPosChannel + 2;
       _setpoint = setpoint;
       _speed = spd;
       _pid = new PID(&_pos, &_speed, &_setpoint, pidP, pidI, pidD, DIRECT);
       _pid->SetSampleTime(sampleRate); // Sets the sample rate
       _pid->SetMode(AUTOMATIC);
     }
-    
-    void setUseRanges(bool useRanges){
+
+    void setUseRanges(bool useRanges) {
       _useRanges = useRanges;
     }
 
-    bool getUseRanges(){
+    bool getUseRanges() {
       return _useRanges;
     }
 
@@ -92,8 +93,8 @@ class Fader {
       _setpoint = setpoint;
     }
 
-    void setSetpointPercent(int setpoint) {
-      setSetpoint((setpoint/100.0) * 1023.0);
+    void setSetpointPromille(int setpoint) {
+      setSetpoint((setpoint / 1000.0) * 1023.0);
     }
 
     void setSetpointNormalised(double setpoint) {
@@ -101,18 +102,18 @@ class Fader {
     }
 
     double getSetpoint() {
-      if(_useRanges)
-        return mapFloat(_setpoint, 0.0, 1023.0, _potRangeBottomValue*1.0, _potRangeTopValue * 1.0);
+      if (_useRanges)
+        return mapFloat(_setpoint, 0.0, 1023.0, _potRangeBottomValue * 1.0, _potRangeTopValue * 1.0);
       else
-      return _setpoint;
+        return _setpoint;
     }
 
     double getSetpointNormalised() {
       return getSetpoint() / 1023.0;
     }
 
-    int getSetpointPercent() {
-      return round(getSetpoint() * 100.0 / 1023.0);
+    int getSetpointPromille() {
+      return round(getSetpoint() * 1000.0 / 1023.0);
     }
 
     double getPos() {
@@ -134,6 +135,14 @@ class Fader {
       }
     }
 
+    boolean wasMoved() {
+      if (_wasMoved) {
+        _wasMoved = false;
+        return true;
+      }
+      return false;
+    }
+
     void setAutomatic() {
       if (_state != F_AUTOMATIC) {
         _state = F_AUTOMATIC;
@@ -145,9 +154,22 @@ class Fader {
       _faderAdsValue = getAdsValue(_adsFaderPosChannel);
       _potRangeTopAdsValue = getAdsValue(_adsPotRangeTopChannel);
       _potRangeBottomAdsValue = getAdsValue(_adsPotRangeBottomChannel);
-      _potRangeTopValue = round(constrain(mapFloat(_potRangeTopAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0));
-      _potRangeBottomValue = round(constrain(mapFloat(_potRangeBottomAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0));
-      _pos = constrain(mapFloat(_faderAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0);
+
+      int newPotRangeTopValue = round(constrain(mapFloat(_potRangeTopAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0));
+      if (newPotRangeTopValue != _potRangeTopValue) {
+        _wasMoved = true;
+        _potRangeTopValue = newPotRangeTopValue;
+      }
+      int newPotRangeBottomValue = round(constrain(mapFloat(_potRangeBottomAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0));
+      if (newPotRangeBottomValue != _potRangeBottomValue) {
+        _wasMoved = true;
+        _potRangeBottomValue = newPotRangeBottomValue;
+      }
+      double newPos = constrain(mapFloat(_faderAdsValue, _faderCalibrationLow, _faderCalibrationHigh, 0.0, 1023.0), 0.0, 1023.0);
+      if (abs(newPos - _pos) > 0.5) {
+        _wasMoved = true;
+        _pos = newPos;
+      }
       if (_state == F_AUTOMATIC) {
         if (_pid->Compute()) {
           _motor->setSpeed(floor(abs(_speed)));

@@ -47,8 +47,8 @@ class DmxFixtureCWVW8bit : public DmxFixture {
     float invGamma = 1.0/gamma;
     uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
       float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
-      data[startChannel] = byte(pow(temperatureNormalisedInRange, invGamma) * normalisedIntensity * 255);
-      data[startChannel + 1] = byte(pow((1.0 - temperatureNormalisedInRange), invGamma) * normalisedIntensity * 255);
+      data[startChannel] = byte(round(pow(temperatureNormalisedInRange, invGamma) * normalisedIntensity * 255));
+      data[startChannel + 1] = byte(round(pow((1.0 - temperatureNormalisedInRange), invGamma) * normalisedIntensity * 255));
       return _channelCount;
     };
 };
@@ -60,8 +60,8 @@ class DmxFixtureIT8bit : public DmxFixture {
     }
     uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
       float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
-      data[startChannel] = byte(normalisedIntensity * 255);
-      data[startChannel + 1] = byte(temperatureNormalisedInRange * 255);
+      data[startChannel] = byte(round(normalisedIntensity * 255));
+      data[startChannel + 1] = byte(round(temperatureNormalisedInRange * 255));
       return _channelCount;
     };
 };
@@ -74,8 +74,8 @@ class DmxFixtureTI8bit : public DmxFixture {
     }
     uint8_t setChannels(byte data[], int startChannel, float normalisedIntensity, int temperatureKelvin) {
       float temperatureNormalisedInRange = constrain(mapFloat(temperatureKelvin, _kelvinLow, _kelvinHigh, 0.0, 1.0), 0.0, 1.0);
-      data[startChannel] = byte(temperatureNormalisedInRange * 255);
-      data[startChannel + 1] = byte(normalisedIntensity * 255);
+      data[startChannel] = byte(round(temperatureNormalisedInRange * 255));
+      data[startChannel + 1] = byte(round(normalisedIntensity * 255));
       return _channelCount;
     };
 };
