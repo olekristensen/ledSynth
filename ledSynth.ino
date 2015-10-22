@@ -367,6 +367,8 @@ void setup() {
   }
 
   newID = conf->id;
+  
+  remoteChannel = conf->id;
 
   // QUAD ENCODER
   pinMode(quadButtonPin, INPUT_PULLUP);
