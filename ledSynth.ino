@@ -20,10 +20,7 @@
     olek@itu.dk
 */
 
-// TODO: Mixing and interface
-// TODO: Optimization - fixtures in daugtherboard?
 // TODO: Light sensor calibration
-// TODO: Ranges as fader crops, not fader scalings - faders remain absolute and moves with cropping changes.
 
 #include <Wire.h>                    // I2C
 #include <LiquidTWI.h>               // Display
@@ -51,7 +48,7 @@
 
 const String identityString = "light node";
 const int versionMajor = 0;
-const int versionMinor = 8;
+const int versionMinor = 9;
 int newID = 0;
 
 
@@ -73,6 +70,9 @@ int temperatureKelvinRemote;
 
 int intensityPromilleOutput;
 int temperatureKelvinOutput;
+
+double intensityPosManual;
+double temperaturePosManual;
 
 const byte lcdCharBarGraph0[8] = {
   B00000,
@@ -156,8 +156,8 @@ const int quadButtonPin = 2;
 const int quadPhasePinA = 3;
 const int quadPhasePinB = 4;
 const int quadPhasesPerTick = 4;
-long quadLastTickMillis = 0;
-long quadLastClickMillis = 0;
+unsigned long quadLastTickMillis = 0;
+unsigned long quadLastClickMillis = 0;
 static volatile int quadButtonPushes;
 int quadPos = 0;
 qdec quad(quadPhasePinA, quadPhasePinB);
@@ -262,6 +262,8 @@ int lightSensorG;
 int lightSensorB;
 int lightSensorC;
 bool lightSensorOnline = false;
+unsigned long nextLightMeasuring = 0;
+unsigned int millisLightMeasureInterval = 3000;
 
 
 // PWM
@@ -315,8 +317,8 @@ void statefulLCDclear(int theState = -1);
 
 // TIME
 
-long millisLastFrame = 0;
-long frameCount = 0;
+unsigned long millisLastFrame = 0;
+unsigned long frameCount = 0;
 int millisPerFrame = 0;
 
 
@@ -324,7 +326,8 @@ int millisPerFrame = 0;
 
 int dmxBoardWireAddress = 100; // 0x64
 int temperatureKelvinMax = 6500;
-int temperatureKelvinMin = 2700;
+int temperatureKelvinMin = 2000;
+unsigned long nextDMXSendMillis = 0;
 
 
 void setup() {
@@ -447,6 +450,11 @@ void loop() {
         delay(5);
       }
       delay(250);
+
+      setTempRangesFromi2c(dmxBoardWireAddress);
+
+      DEBUG_PRINT("Dmx Board setup");
+
       quad.enable();
       state = S_FADER_CALIBRATE;
       break;
@@ -549,16 +557,8 @@ void loop() {
       intensityPromilleOutput = intensityPromilleManual = faderIntensity.getSetpointPromille();
       temperatureKelvinOutput = temperatureKelvinManual = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax ));
 
-      Wire.beginTransmission( dmxBoardWireAddress ); {
-        byte ilow = lowByte(intensityPromilleOutput);
-        byte ihi = highByte(intensityPromilleOutput);
-        byte tlow = lowByte(temperatureKelvinOutput);
-        byte thi = highByte(temperatureKelvinOutput);
-        byte data[] = {ilow, ihi, tlow, thi};
-        Wire.write(data, 4);
-      }
-      Wire.endTransmission();
-
+      sendDMXi2c( intensityPromilleOutput,  temperatureKelvinOutput,  dmxBoardWireAddress);
+      //sendDMXanalog( intensityPromilleOutput,  temperatureKelvinOutput );
       // Display
       lcd.setCursor(15, 1);
       if (thisFrameMillis % 2000 < 800 && thisFrameMillis % 400 < 200 ) {
@@ -674,11 +674,15 @@ void loop() {
       }
 
       // GET FADER INPUTS IF TOUCHED
+
+      // intensity input
+
       if (touchFaderIntensity || remoteChannel == conf->id) {
         if (faderIntensity._state == Fader::F_AUTOMATIC) {
           faderIntensity.setManual();
         } else {
           if (faderIntensity.wasMoved()) {
+            intensityPosManual = faderIntensity.getPos();
             intensityPromilleManual = faderIntensity.getSetpointPromille();
             gUpdateValue(&intensityPromilleManual);
           }
@@ -694,13 +698,23 @@ void loop() {
         faderIntensityRangeBottom = faderIntensity._potRangeBottomValue;
       }
 
-      gUpdateValue(&(faderIntensity._potRangeBottomValue));
+      int faderIntensityRangeBottomPromille = map(faderIntensityRangeBottom, 0, 1023, 0, 1000);
+      int faderIntensityRangeTopPromille = map(faderIntensityRangeTop, 0, 1023, 0, 1000);
+
+      int newIntensityPromilleManual = round(mapFloat(intensityPosManual * 1.0, 0.0, 1023.0, faderIntensityRangeBottomPromille * 1.0, faderIntensityRangeTopPromille * 1.0));
+      if (newIntensityPromilleManual != temperatureKelvinManual) {
+        intensityPromilleManual = newIntensityPromilleManual;
+        gUpdateValue(&intensityPromilleManual);
+      }
+
+      // temperature input
 
       if (touchFaderTemperature || remoteChannel == conf->id) {
         if (faderTemperature._state == Fader::F_AUTOMATIC) {
           faderTemperature.setManual();
         } else {
           if (faderTemperature.wasMoved()) {
+            temperaturePosManual = faderTemperature.getPos();
             temperatureKelvinManual = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax ));
             gUpdateValue(&temperatureKelvinManual);
           }
@@ -715,17 +729,46 @@ void loop() {
         faderTemperatureRangeBottom = faderTemperature._potRangeBottomValue;
       }
 
+      int faderTemperatureRangeBottomKelvin = map(faderTemperatureRangeBottom, 0, 1023, temperatureKelvinMin, temperatureKelvinMax);
+      int faderTemperatureRangeTopKelvin = map(faderTemperatureRangeTop, 0, 1023, temperatureKelvinMin, temperatureKelvinMax);
+
+      int newTemperatureKelvinManual = round(mapFloat(temperaturePosManual * 1.0, 0.0, 1023.0, faderTemperatureRangeBottomKelvin * 1.0, faderTemperatureRangeTopKelvin * 1.0));
+      if (newTemperatureKelvinManual != temperatureKelvinManual) {
+        temperatureKelvinManual = newTemperatureKelvinManual;
+        gUpdateValue(&temperatureKelvinManual);
+      }
+
       // CALCULATE OUTPUT
 
       if (remoteChannel == conf->id) {
+        // manual
         intensityPromilleOutput = intensityPromilleManual;
         temperatureKelvinOutput = temperatureKelvinManual;
       } else if (remoteChannel != 0) {
-        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleRemote, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
-        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemote, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+        // connected
+
+        int intensityPromilleRemoteRanged = map(intensityPromilleRemote, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+        int temperatureKelvinRemoteRanged = map(temperatureKelvinRemote, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
+
+        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
       } else if (remoteChannel == 0) {
-        intensityPromilleOutput = round(lerp(intensityPromilleManual, constrain(map(lightSensorLux, 100, 30000, 0, 1000), 0, 1000), mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
-        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, lightSensorCt, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+        // sensor
+        if (nextLightMeasuring < thisFrameMillis) {
+          lcd.setCursor(2, 0);
+          lcd.print("measuring light");
+          measureLight();
+          statefulLCDclear();
+          gUpdateValue(&lightSensorLux);
+          gUpdateValue(&lightSensorCt);
+          nextLightMeasuring += millisLightMeasureInterval;
+        }
+
+        int intensityPromilleSensorRanged = map(constrain(map(lightSensorLux, 0, 3000, 0, 1000), 0, 1000), 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+        int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
+
+        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
       }
 
       gUpdateValue(&intensityPromilleOutput);
@@ -739,7 +782,10 @@ void loop() {
           if (faderIntensity._state == Fader::F_MANUAL) {
             faderIntensity.setAutomatic();
           }
-          faderIntensity.setSetpointNormalised(intensityPromilleOutput / 1000.0);
+          if (faderIntensityRangeBottomPromille != faderIntensityRangeTopPromille)
+            faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 1.0 * faderIntensityRangeBottomPromille, 1.0 * faderIntensityRangeTopPromille, 0.0, 1.0 )), 0.0));
+          else
+            faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 0.0, 1000.0, 0.0, 1.0 )), 0.0));
         }
       }
 
@@ -748,7 +794,10 @@ void loop() {
           if (faderTemperature._state == Fader::F_MANUAL) {
             faderTemperature.setAutomatic();
           }
-          faderTemperature.setSetpointNormalised(mapFloat(temperatureKelvinOutput, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax, 0.0, 1.0 ));
+          if (faderTemperatureRangeBottomKelvin != faderTemperatureRangeTopKelvin)
+            faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * faderTemperatureRangeBottomKelvin, 1.0 * faderTemperatureRangeTopKelvin, 0.0, 1.0 )), 0.0));
+          else
+            faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax, 0.0, 1.0 )), 0.0));
         }
       }
 
@@ -759,15 +808,8 @@ void loop() {
 
       // SEND DMX
 
-      Wire.beginTransmission( dmxBoardWireAddress ); {
-        byte ilow = lowByte(intensityPromilleOutput);
-        byte ihi = highByte(intensityPromilleOutput);
-        byte tlow = lowByte(temperatureKelvinOutput);
-        byte thi = highByte(temperatureKelvinOutput);
-        byte data[] = {ilow, ihi, tlow, thi};
-        Wire.write(data, 4);
-      }
-      Wire.endTransmission();
+      sendDMXi2c( intensityPromilleOutput,  temperatureKelvinOutput,  dmxBoardWireAddress);
+      //sendDMXanalog( intensityPromilleOutput,  temperatureKelvinOutput );
 
       // Display
 
@@ -779,25 +821,32 @@ void loop() {
       }
 
       lcd.setCursor(1, 1);
-      if (faderIntensity._useRanges && faderIntensity._potRangeTopValue < 1023)
-        lcd.write(byte(3)); // truncated range
-      else if (touchFaderIntensity)
-        lcd.print("[");
-      else
-        lcd.print(" ");
-      if (touchFaderIntensity) {
-        lcdPrintNumberPadded(intensityPromilleManual / 10, 3, ' ');
+      if (thisFrameMillis % 6000 > 3000 && remoteChannel == 0 && !touchFaderIntensity) {
+        lcdPrintNumberPadded(lightSensorLux, 4, ' ');
+        lcd.print("Lx");
       } else {
-        lcdPrintNumberPadded(intensityPromilleOutput / 10, 3, ' ');
-      }
-      lcd.print("%");
-      if (faderIntensity._useRanges && faderIntensity._potRangeBottomValue > 0)
-        lcd.write(byte(4)); // truncated range
-      else if (touchFaderIntensity)
-        lcd.print("]");
-      else
+        if (faderIntensity._useRanges && faderIntensity._potRangeTopValue < 1023)
+          lcd.write(byte(3)); // truncated range
+        else if (touchFaderIntensity)
+          lcd.print("[");
+        else
+          lcd.print(" ");
+        if (touchFaderIntensity) {
+          lcdPrintNumberPadded(intensityPromilleManual / 10, 3, ' ');
+        } else {
+          lcdPrintNumberPadded(intensityPromilleOutput / 10, 3, ' ');
+        }
+        lcd.print("%");
+        if (faderIntensity._useRanges && faderIntensity._potRangeBottomValue > 0)
+          lcd.write(byte(4)); // truncated range
+        else if (touchFaderIntensity)
+          lcd.print("]");
+        else
+          lcd.print(" ");
+
         lcd.print(" ");
 
+      }
       lcd.setCursor(8, 1);
       if (faderTemperature._useRanges && faderTemperature._potRangeTopValue < 1023)
         lcd.write(byte(3)); // truncated range
@@ -1153,6 +1202,54 @@ void statefulLCDclear(int theState) {
   }
 }
 
+void sendDMXi2c(unsigned int iP, unsigned int tK, int addr) {
+
+  //  if (nextDMXSendMillis < millis()) {
+  //    nextDMXSendMillis = millis() + 100;
+  Wire.beginTransmission( addr ); {
+    byte ilow = lowByte(iP);
+    byte ihi = highByte(iP);
+    byte tlow = lowByte(tK);
+    byte thi = highByte(tK);
+    byte data[] = {ilow, ihi, tlow, thi};
+    Wire.write(data, 4);
+  }
+  Wire.endTransmission();
+  //  }
+}
+
+void sendDMXanalog(unsigned int iP, unsigned int tK) {
+  float pwmIntensity = mapFloat(iP, 0.0, 1000.0, 0.0, 1.0);
+  float pwmTemperature = mapFloat(tK, temperatureKelvinMin, temperatureKelvinMax, 0.0, 1.0);
+  pwm.setPWM(4, 0, round( 0xFFF * pwmIntensity ));
+  pwm.setPWM(5, 0, round( 0xFFF * pwmTemperature));
+}
+
+
 float getBatteryLevelNormalised() {
   return constrain((analogRead(1) / 1023.0) * (3.33 / 2.366), 0.0, 1.0);
+}
+
+void setTempRangesFromi2c(int addr) {
+
+  byte hbMin;
+  byte lbMin;
+  byte hbMax;
+  byte lbMax;
+
+  Wire.requestFrom(addr, 4);    // request 4 bytes from slave device
+  delay(100);
+  if (Wire.available() == 4)   // if four bytes were received
+  {
+    lbMin = Wire.read();
+    hbMin = Wire.read();
+    lbMax = Wire.read();
+    hbMax = Wire.read();
+
+    int tMin = word(hbMin, lbMin);
+    int tMax = word(hbMax, lbMax);
+
+    temperatureKelvinMin = tMin;
+    temperatureKelvinMax = tMax;
+  }
 }
