@@ -49,7 +49,7 @@
 
 const String identityString = "light node";
 const int versionMajor = 0;
-const int versionMinor = 9;
+const int versionMinor = 91;
 int newID = 0;
 
 
@@ -299,6 +299,15 @@ bool statusMessageCleared = false;
 void setStatusMessage(char * _text, long millisToShow = -1);
 
 
+// PIR (MOVEMENT) SENSOR
+
+Adafruit_ADS1115 * pirADS = &faderIntensityPots;
+const int pirADCChannel = 3;
+const int pirLEDChannel = 3;
+int pirLedActive = 0;
+int pirReading = 0;
+float pirReadingFiltered = 0.0;
+
 // STATE
 
 enum State { S_BOOT,
@@ -368,7 +377,7 @@ void setup() {
   }
 
   newID = conf->id;
-  
+
   remoteChannel = conf->id;
 
   // QUAD ENCODER
@@ -421,6 +430,7 @@ void setup() {
   //PWM
   pwm.begin();
   pwm.setPWMFreq(1600);  // This is the maximum PWM frequency
+  pwm.setPWM(pirLEDChannel, 0, 0);
 
   DEBUG_PRINT("PWM setup");
 
@@ -757,15 +767,9 @@ void loop() {
         temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
       } else if (remoteChannel == 0) {
         // sensor
-        if (nextLightMeasuring < thisFrameMillis) {
-          lcd.setCursor(2, 0);
-          lcd.print("measuring light");
-          measureLight();
-          statefulLCDclear();
-          gUpdateValue(&lightSensorLux);
-          gUpdateValue(&lightSensorCt);
-          nextLightMeasuring += millisLightMeasureInterval;
-        }
+        measureLight();
+        gUpdateValue(&lightSensorLux);
+        gUpdateValue(&lightSensorCt);
 
         int intensityPromilleSensorRanged = map(constrain(map(lightSensorLux, 0, 3000, 0, 1000), 0, 1000), 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
         int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
@@ -904,6 +908,23 @@ void loop() {
     lcd.write(byte(2));
   }
 
+  int newPirReading = pirADS->readADC_SingleEnded(pirADCChannel);
+  if (newPirReading > 10000) {
+    pirReading = 1;
+  } else {
+    pirReading = 0;
+  }
+  if (pirLedActive > 0) {
+    pirReadingFiltered *= 0.75;
+    pirReadingFiltered += pirReading * 0.25;
+    pwm.setPWM(3, 0, floor(pirReadingFiltered * 0xFFF));
+  } else if (pirReadingFiltered > 0.0 && pirReading == 0) {
+    pirReadingFiltered = 0.0;
+    pwm.setPWM(pirLEDChannel, 0, 0);
+  }
+  gUpdateValue(&pirReading);
+
+
   frameCount++;
   millisLastFrame = thisFrameMillis;
 }
@@ -976,12 +997,14 @@ void gInit()
   gAddSlider(temperatureKelvinMin, temperatureKelvinMax, "temperature output", &temperatureKelvinOutput);
 
   calibrateButtonId = gAddButton("calibrate");
-  gAddLabel("PID", 2);
 
-  pidAId = gAddSlider(0, 1000, "A", &faderPidAint);
-  pidPId = gAddSlider(0, 1000, "P", &faderPidPint);
-  pidIId = gAddSlider(0, 10000, "I", &faderPidIint);
-  pidDId = gAddSlider(0, 1000,  "D", &faderPidDint);
+  /*  gAddLabel("PID", 2);
+
+    pidAId = gAddSlider(0, 1000, "A", &faderPidAint);
+    pidPId = gAddSlider(0, 1000, "P", &faderPidPint);
+    pidIId = gAddSlider(0, 10000, "I", &faderPidIint);
+    pidDId = gAddSlider(0, 1000,  "D", &faderPidDint);
+  */
 
   gAddLabel("RANGES", 2);
   gAddSlider(0, 1023, "intensity top", &(faderIntensity._potRangeTopValue));
@@ -995,6 +1018,7 @@ void gInit()
     gAddLabel("SENSOR", 2);
     gAddSlider(0, 10000, "lux", &lightSensorLux);
     gAddSlider(0, 10000, "ct", &lightSensorCt);
+    gAddSlider(0, 4, "agc", &(lightSensor.agc_cur));
     lightsensorButtonId = gAddButton("measure");
     //gAddSlider(0, 1023, "r", &lightSensorR);
     //gAddSlider(0, 1023, "g", &lightSensorG);
@@ -1009,17 +1033,18 @@ void gInit()
   remoteMixLevelSliderId = gAddSlider(0, remoteMixMax, "mixer", &remoteMixLevel);
   gAddSpacer(1);
 
-
   gAddLabel("IDENTITY", 2);
   idSliderId = gAddSlider(0, maxRemoteChannels, "ID", &newID);
   saveConfigButtonId = gAddButton("save id");
   remoteChannelSliderId = gAddSlider(0, maxRemoteChannels, "CHANNEL", &remoteChannel);
   gAddSpacer(1);
 
-  /* GRAPHS
-  gAddMovingGraph("TQsize", 0, tq.buffersize(), &tqSize, 10);
-  //  gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
-  gAddMovingGraph("MILLIS/FRAME", 0, 41, &millisPerFrame, 10);
+  //* GRAPHS
+  // gAddMovingGraph("TQsize", 0, tq.buffersize(), &tqSize, 10);
+  // gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
+  // gAddMovingGraph("MILLIS/FRAME", 0, 41, &millisPerFrame, 10);
+  gAddSlider(0, 1, "movement", &pirReading);
+  gAddToggle("LED movement indicator", &pirLedActive);
   gAddSpacer(1);
   //*/
 
@@ -1065,10 +1090,10 @@ void gButtonPressed(int id, int value)
   if (lightsensorButtonId == id && value > 0)
   {
     measureLight();
-    gUpdateValue(&lightSensorR);
-    gUpdateValue(&lightSensorG);
-    gUpdateValue(&lightSensorB);
-    gUpdateValue(&lightSensorC);
+//    gUpdateValue(&lightSensorR);
+//    gUpdateValue(&lightSensorG);
+//    gUpdateValue(&lightSensorB);
+//    gUpdateValue(&lightSensorC);
     gUpdateValue(&lightSensorLux);
     gUpdateValue(&lightSensorCt);
   }
@@ -1136,13 +1161,14 @@ void measureLight() {
     lcd.setCursor(2, 0);
     lcd.print("measuring light");
   */
-  lightSensor.getData();
-  lightSensorR = lightSensor.r_comp;
-  lightSensorG = lightSensor.g_comp;
-  lightSensorB = lightSensor.b_comp;
-  lightSensorC = lightSensor.c_comp;
-  lightSensorLux = lightSensor.lux;
-  lightSensorCt = lightSensor.ct;
+  if (lightSensor.getDataAsync()) {
+    lightSensorR = lightSensor.r_comp;
+    lightSensorG = lightSensor.g_comp;
+    lightSensorB = lightSensor.b_comp;
+    lightSensorC = lightSensor.c_comp;
+    lightSensorLux = lightSensor.lux;
+    lightSensorCt = lightSensor.ct;
+  }
   //statefulLCDclear();
 }
 
