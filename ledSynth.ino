@@ -256,15 +256,22 @@ uint16_t capCurrTouched = 0;
 // LIGHT SENSOR
 
 tcs34725 lightSensor; // I2C 0x29
+int lightSensorLux_raw;
+int lightSensorCt_raw;
+int lightSensorR_raw;
+int lightSensorG_raw;
+int lightSensorB_raw;
+int lightSensorC_raw;
+int lightSensorAgc_raw;
+
 int lightSensorLux;
 int lightSensorCt;
 int lightSensorR;
 int lightSensorG;
 int lightSensorB;
 int lightSensorC;
+int lightSensorAgc;
 bool lightSensorOnline = false;
-unsigned long nextLightMeasuring = 0;
-unsigned int millisLightMeasureInterval = 3000;
 
 
 // PWM
@@ -770,7 +777,7 @@ void loop() {
         measureLight();
         gUpdateValue(&lightSensorLux);
         gUpdateValue(&lightSensorCt);
-
+        gUpdateValue(&lightSensorAgc);
         int intensityPromilleSensorRanged = map(constrain(map(lightSensorLux, 0, 3000, 0, 1000), 0, 1000), 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
         int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
 
@@ -1018,7 +1025,7 @@ void gInit()
     gAddLabel("SENSOR", 2);
     gAddSlider(0, 10000, "lux", &lightSensorLux);
     gAddSlider(0, 10000, "ct", &lightSensorCt);
-    gAddSlider(0, 4, "agc", &(lightSensor.agc_cur));
+    gAddSlider(0, 4, "agc", &lightSensorAgc);
     lightsensorButtonId = gAddButton("measure");
     //gAddSlider(0, 1023, "r", &lightSensorR);
     //gAddSlider(0, 1023, "g", &lightSensorG);
@@ -1089,13 +1096,12 @@ void gButtonPressed(int id, int value)
   }
   if (lightsensorButtonId == id && value > 0)
   {
-    measureLight();
-//    gUpdateValue(&lightSensorR);
-//    gUpdateValue(&lightSensorG);
-//    gUpdateValue(&lightSensorB);
-//    gUpdateValue(&lightSensorC);
+    while (!measureLight()){
+      ;
+    }
     gUpdateValue(&lightSensorLux);
     gUpdateValue(&lightSensorCt);
+    gUpdateValue(&lightSensorAgc);
   }
 
 }
@@ -1156,20 +1162,33 @@ void calibrateFaders() {
   faderIntensity.calibrate();
   statefulLCDclear();
 }
-void measureLight() {
-  /*  statefulLCDclear(-2);
-    lcd.setCursor(2, 0);
-    lcd.print("measuring light");
-  */
+boolean measureLight() {
+  boolean newData = false;
   if (lightSensor.getDataAsync()) {
-    lightSensorR = lightSensor.r_comp;
-    lightSensorG = lightSensor.g_comp;
-    lightSensorB = lightSensor.b_comp;
-    lightSensorC = lightSensor.c_comp;
-    lightSensorLux = lightSensor.lux;
-    lightSensorCt = lightSensor.ct;
+    lightSensorR_raw = lightSensor.r_comp;
+    lightSensorG_raw = lightSensor.g_comp;
+    lightSensorB_raw = lightSensor.b_comp;
+    lightSensorC_raw = lightSensor.c_comp;
+    lightSensorLux_raw = lightSensor.lux;
+    lightSensorCt_raw = lightSensor.ct;
+    lightSensorAgc_raw = lightSensorAgc = lightSensor.agc_cur;
+    newData = true;
   }
-  //statefulLCDclear();
+  lightSensorR = floor(lightSensorR * 0.75);
+  lightSensorR += floor(lightSensorR_raw * 0.25);
+  lightSensorG = floor(lightSensorG * 0.75);
+  lightSensorG += floor(lightSensorG_raw * 0.25);
+  lightSensorB = floor(lightSensorB * 0.75);
+  lightSensorB += floor(lightSensorB_raw * 0.25);
+  lightSensorC = floor(lightSensorC * 0.75);
+  lightSensorC += floor(lightSensorC_raw * 0.25);
+  lightSensorLux = floor(lightSensorLux * 0.75);
+  lightSensorLux += floor(lightSensorLux_raw * 0.25);
+  lightSensorCt = floor(lightSensorCt * 0.75);
+  lightSensorCt += floor(lightSensorCt_raw * 0.25);
+
+  
+  return newData;
 }
 
 void statefulLCDclear(int theState) {

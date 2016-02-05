@@ -50,7 +50,7 @@ class tcs34725 {
     uint16_t r_comp, g_comp, b_comp, c_comp;
     uint16_t saturation, saturation75;
     float cratio, cpl, ct, lux, maxlux;
-    int agc_cur;
+    uint16_t agc_cur;
 
   private:
     struct tcs_agc {
@@ -169,7 +169,7 @@ boolean tcs34725::getDataAsync(void) {
         return false;
       }
       setGainTime();
-      asyncStateNextMillis = currentMillis + ((256 - atime) * 2.4 * 2);
+      asyncStateNextMillis = currentMillis + (atime_ms * 3);
       asyncState = 2;
     } else if (asyncState == 2) {
       tcs.getRawData(&r_raw, &g_raw, &b_raw, &c_raw);
