@@ -767,13 +767,27 @@ void loop() {
         gUpdateValue(&temperatureKelvinManual);
       }
 
+      // READ LIGHT SENSOR
+
+      if (remoteChannel == 0) {
+        // light sensor
+        measureLight();
+        gUpdateValue(&lightSensorLux);
+        gUpdateValue(&lightSensorCt);
+        gUpdateValue(&lightSensorLevelPromille);
+      }
+
       // CALCULATE OUTPUT
 
       if (remoteChannel == conf->id) {
+
         // manual
+
         intensityPromilleOutput = intensityPromilleManual;
         temperatureKelvinOutput = temperatureKelvinManual;
+
       } else if (remoteChannel != 0) {
+
         // connected
 
         int intensityPromilleRemoteRanged = map(intensityPromilleRemote, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
@@ -782,24 +796,23 @@ void loop() {
         intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
         temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
       } else if (remoteChannel == 0) {
-        // light sensor
-        measureLight();
-        gUpdateValue(&lightSensorLux);
-        gUpdateValue(&lightSensorCt);
-        //        gUpdateValue(&lightSensorAgc);
-        gUpdateValue(&lightSensorLevelPromille);
-        //        gUpdateValue(&lightSensorStepInt);
-        //        gUpdateValue(&lightSensorR_raw);
-        //        gUpdateValue(&lightSensorG_raw);
-        //        gUpdateValue(&lightSensorB_raw);
-        //        gUpdateValue(&lightSensorC_raw);
 
-        //      int intensityPromilleSensorRanged = map(constrain(map(lightSensorLux, 0, 3000, 0, 1000), 0, 1000), 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+        // light sensor
+
         int intensityPromilleSensorRanged = constrain(map(lightSensorLevelPromille, faderIntensityRangeBottomPromille , faderIntensityRangeTopPromille, 0, 1000), 0, 1000);
         int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
 
         intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
         temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+
+      }
+
+      if (touchFaderIntensity) {
+        intensityPromilleOutput = intensityPromilleManual;
+      }
+
+      if (touchFaderTemperature) {
+        temperatureKelvinOutput = temperatureKelvinManual;
       }
 
       gUpdateValue(&intensityPromilleOutput);
