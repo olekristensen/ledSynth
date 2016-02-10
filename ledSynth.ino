@@ -264,13 +264,22 @@ int lightSensorB_raw;
 int lightSensorC_raw;
 int lightSensorAgc_raw;
 
-int lightSensorLux;
-int lightSensorCt;
-int lightSensorR;
-int lightSensorG;
-int lightSensorB;
-int lightSensorC;
-int lightSensorAgc;
+int lightSensorLux = 0;
+int lightSensorCt = 0;
+float lightSensorLuxFloat = 0.0;
+float lightSensorCtFloat = 0.0;
+int lightSensorR = 0;
+int lightSensorG = 0;
+int lightSensorB = 0;
+int lightSensorC = 0;
+int lightSensorAgc = 0;
+
+int lightSensorCplPercent = 0;
+float lightSensorStep = 0;
+int lightSensorStepInt = 0;
+float lightSensorLevelNormalised = 0.0; // human perception approximation from complete darkness (0 lux) to direct sunlight (1,000,000)
+int lightSensorLevelPromille = 0; // x1000
+
 bool lightSensorOnline = false;
 
 
@@ -773,12 +782,20 @@ void loop() {
         intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
         temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
       } else if (remoteChannel == 0) {
-        // sensor
+        // light sensor
         measureLight();
         gUpdateValue(&lightSensorLux);
         gUpdateValue(&lightSensorCt);
-        gUpdateValue(&lightSensorAgc);
-        int intensityPromilleSensorRanged = map(constrain(map(lightSensorLux, 0, 3000, 0, 1000), 0, 1000), 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+        //        gUpdateValue(&lightSensorAgc);
+        gUpdateValue(&lightSensorLevelPromille);
+        //        gUpdateValue(&lightSensorStepInt);
+        //        gUpdateValue(&lightSensorR_raw);
+        //        gUpdateValue(&lightSensorG_raw);
+        //        gUpdateValue(&lightSensorB_raw);
+        //        gUpdateValue(&lightSensorC_raw);
+
+        //      int intensityPromilleSensorRanged = map(constrain(map(lightSensorLux, 0, 3000, 0, 1000), 0, 1000), 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+        int intensityPromilleSensorRanged = constrain(map(lightSensorLevelPromille, faderIntensityRangeBottomPromille , faderIntensityRangeTopPromille, 0, 1000), 0, 1000);
         int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
 
         intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
@@ -815,7 +832,7 @@ void loop() {
         }
       }
 
-      faderIntensity.setUseRanges(useFaderRanges > 0);
+      faderIntensity.setUseRanges(useFaderRanges > 0 || !remoteChannel == 0);
       faderTemperature.setUseRanges(useFaderRanges > 0);
       faderIntensity.update();
       faderTemperature.update();
@@ -1023,9 +1040,11 @@ void gInit()
   gAddSpacer(1);
   if (lightSensorOnline) {
     gAddLabel("SENSOR", 2);
-    gAddSlider(0, 10000, "lux", &lightSensorLux);
+    gAddSlider(0, 30000, "lux", &lightSensorLux);
     gAddSlider(0, 10000, "ct", &lightSensorCt);
-    gAddSlider(0, 4, "agc", &lightSensorAgc);
+    //    gAddSlider(-1, 5, "agc", &lightSensorAgc);
+    gAddSlider(0, 1000, "light level", &lightSensorLevelPromille);
+    //    gAddSlider(0, 10000, "light step", &lightSensorStepInt);
     lightsensorButtonId = gAddButton("measure");
     //gAddSlider(0, 1023, "r", &lightSensorR);
     //gAddSlider(0, 1023, "g", &lightSensorG);
@@ -1096,7 +1115,7 @@ void gButtonPressed(int id, int value)
   }
   if (lightsensorButtonId == id && value > 0)
   {
-    while (!measureLight()){
+    while (!measureLight()) {
       ;
     }
     gUpdateValue(&lightSensorLux);
@@ -1165,29 +1184,33 @@ void calibrateFaders() {
 boolean measureLight() {
   boolean newData = false;
   if (lightSensor.getDataAsync()) {
-    lightSensorR_raw = lightSensor.r_comp;
-    lightSensorG_raw = lightSensor.g_comp;
-    lightSensorB_raw = lightSensor.b_comp;
-    lightSensorC_raw = lightSensor.c_comp;
+    //    lightSensorR_raw = lightSensorR = lightSensor.r_comp;
+    //    lightSensorG_raw = lightSensorG = lightSensor.g_comp;
+    //    lightSensorB_raw = lightSensorB = lightSensor.b_comp;
+    //    lightSensorC_raw = lightSensorC = lightSensor.c_comp;
     lightSensorLux_raw = lightSensor.lux;
     lightSensorCt_raw = lightSensor.ct;
-    lightSensorAgc_raw = lightSensorAgc = lightSensor.agc_cur;
+    //    lightSensorAgc_raw = lightSensorAgc = lightSensor.agc_cur;
     newData = true;
   }
-  lightSensorR = floor(lightSensorR * 0.75);
-  lightSensorR += floor(lightSensorR_raw * 0.25);
-  lightSensorG = floor(lightSensorG * 0.75);
-  lightSensorG += floor(lightSensorG_raw * 0.25);
-  lightSensorB = floor(lightSensorB * 0.75);
-  lightSensorB += floor(lightSensorB_raw * 0.25);
-  lightSensorC = floor(lightSensorC * 0.75);
-  lightSensorC += floor(lightSensorC_raw * 0.25);
-  lightSensorLux = floor(lightSensorLux * 0.75);
-  lightSensorLux += floor(lightSensorLux_raw * 0.25);
-  lightSensorCt = floor(lightSensorCt * 0.75);
-  lightSensorCt += floor(lightSensorCt_raw * 0.25);
 
-  
+  // smooth out lux and ct
+
+  float smoothUpdateFactor = 0.15;
+
+  lightSensorLuxFloat *= (1.0 - smoothUpdateFactor);
+  lightSensorLuxFloat += lightSensorLux_raw * smoothUpdateFactor;
+  lightSensorLux = round(lightSensorLuxFloat);
+
+  lightSensorCtFloat *= (1.0 - smoothUpdateFactor);
+  lightSensorCtFloat += lightSensorCt_raw * smoothUpdateFactor;
+  lightSensorCt = round(lightSensorCtFloat);
+
+  lightSensorStep = lightSensorStepFromLux(lightSensorLux);
+
+  lightSensorStepInt = floor(lightSensorStep * 1000);
+  lightSensorLevelNormalised = log10(lightSensorLux) / 5.0;
+  lightSensorLevelPromille = floor(lightSensorLevelNormalised * 1000);
   return newData;
 }
 
@@ -1300,4 +1323,39 @@ void setTempRangesFromi2c(int addr) {
     temperatureKelvinMin = tMin;
     temperatureKelvinMax = tMax;
   }
+}
+
+float lightSensorStepFromLux(int lux) {
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd319008(v=vs.85).aspx
+  // In this example, the expected values range from 0 lux to 1,000,000 lux
+
+  if (lightSensorLux <= 10) {
+    // Pitch Black
+    return lightSensorLux / 10.0;
+  } else if (lightSensorLux <= 50 ) {
+    // Very Dark
+    return ((lightSensorLux - 10) / 40.0)       + 1.0;
+  } else if (lightSensorLux <= 200 ) {
+    // Dark Indoors
+    return ((lightSensorLux - 50) / 150.0)      + 2.0;
+  } else if (lightSensorLux <= 400 ) {
+    // Dim Indoors
+    return ((lightSensorLux - 200) / 200.0)     + 3.0;
+  } else if (lightSensorLux <= 1000 ) {
+    // Normal Indoors
+    return ((lightSensorLux - 400) / 600.0)     + 4.0;
+  } else if (lightSensorLux <= 5000 ) {
+    // Bright Indoors
+    return ((lightSensorLux - 1000) / 4000.0)   + 5.0;
+  } else if (lightSensorLux <= 10000 ) {
+    // Dim Outdoors
+    return ((lightSensorLux - 5000) / 5000.0)   + 6.0;
+  } else if (lightSensorLux <= 30000 ) {
+    // Cloudy Outdoors
+    return ((lightSensorLux - 10000) / 20000.0) + 7.0;
+  } else {
+    // Direct Sunlight
+    return min(((lightSensorLux - 30000) / 70000.0) + 8.0, 9.0);
+  }
+
 }

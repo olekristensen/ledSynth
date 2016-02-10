@@ -28,7 +28,7 @@
 #define TCS34725_R_Coef 0.136
 #define TCS34725_G_Coef 1.000
 #define TCS34725_B_Coef -0.444
-#define TCS34725_GA 1.0
+#define TCS34725_GA 1.0869 // Clear acryllic (PLEXIGLAS® XT, SPMMA0030XRCL00, ~92% transmittance, UV Blocking) : 1/0.92
 #define TCS34725_DF 310.0
 #define TCS34725_CT_Coef 3810.0
 #define TCS34725_CT_Offset 1391.0
@@ -80,6 +80,7 @@ const tcs34725::tcs_agc tcs34725::agc_lst[] = {
   { TCS34725_GAIN_16X, TCS34725_INTEGRATIONTIME_154MS, 16790, 63000 },
   { TCS34725_GAIN_4X,  TCS34725_INTEGRATIONTIME_154MS, 15740, 63000 },
   { TCS34725_GAIN_1X,  TCS34725_INTEGRATIONTIME_154MS, 15740, 0 }
+//  { TCS34725_GAIN_1X,  TCS34725_INTEGRATIONTIME_50MS,  15740, 0 }
 };
 tcs34725::tcs34725() : agc_cur(0), isAvailable(0), isSaturated(0) {
 }
@@ -133,10 +134,10 @@ void tcs34725::getData(void) {
 
   // DN40 calculations
   ir = (r + g + b > c) ? (r + g + b - c) / 2 : 0;
-  r_comp = r - ir;
-  g_comp = g - ir;
-  b_comp = b - ir;
-  c_comp = c - ir;
+  r_comp = max(r - ir, 0);
+  g_comp = max(g - ir, 0);
+  b_comp = max(b - ir, 0);
+  c_comp = max(c - ir, 0);
   cratio = float(ir) / float(c);
 
   saturation = ((256 - atime) > 63) ? 65535 : 1024 * (256 - atime);
@@ -169,7 +170,7 @@ boolean tcs34725::getDataAsync(void) {
         return false;
       }
       setGainTime();
-      asyncStateNextMillis = currentMillis + (atime_ms * 3);
+      asyncStateNextMillis = currentMillis + (atime_ms * 4);
       asyncState = 2;
     } else if (asyncState == 2) {
       tcs.getRawData(&r_raw, &g_raw, &b_raw, &c_raw);
@@ -180,13 +181,13 @@ boolean tcs34725::getDataAsync(void) {
       g = g_raw;
       b = b_raw;
       c = c_raw;
-      
+
       // DN40 calculations
       ir = (r + g + b > c) ? (r + g + b - c) / 2 : 0;
-      r_comp = r - ir;
-      g_comp = g - ir;
-      b_comp = b - ir;
-      c_comp = c - ir;
+      r_comp = max(r - ir, 0);
+      g_comp = max(g - ir, 0);
+      b_comp = max(b - ir, 0);
+      c_comp = max(c - ir, 0);
       cratio = float(ir) / float(c);
 
       saturation = ((256 - atime) > 63) ? 65535 : 1024 * (256 - atime);
@@ -196,14 +197,15 @@ boolean tcs34725::getDataAsync(void) {
       maxlux = 65535 / (cpl * 3);
 
       lux = (TCS34725_R_Coef * float(r_comp) + TCS34725_G_Coef * float(g_comp) + TCS34725_B_Coef * float(b_comp)) / cpl;
-      ct = TCS34725_CT_Coef * float(b_comp) / float(r_comp) + TCS34725_CT_Offset;
-      
+      if (lux > 2) { // don't calculate temperature below 2 lux, math screws up...
+        ct = TCS34725_CT_Coef * float(b_comp) / float(r_comp) + TCS34725_CT_Offset;
+      }
       asyncState = 0;
       return true;
 
     }
 
   }
-  
+
   return false;
 }
