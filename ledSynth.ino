@@ -20,9 +20,6 @@
     olek@itu.dk
 */
 
-// TODO: Light sensor as stage machine avoiding delays and busy while loops
-// TODO: Light sensor calibration
-
 #include <Wire.h>                    // I2C
 #include <LiquidTWI.h>               // Display
 #include <Adafruit_ADS1015.h>        // Analog Digital Converter
@@ -49,7 +46,7 @@
 
 const String identityString = "light node";
 const int versionMajor = 0;
-const int versionMinor = 91;
+const int versionMinor = 10;
 int newID = 0;
 
 
