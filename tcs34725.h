@@ -198,7 +198,7 @@ boolean tcs34725::getDataAsync(void) {
 
       lux = (TCS34725_R_Coef * float(r_comp) + TCS34725_G_Coef * float(g_comp) + TCS34725_B_Coef * float(b_comp)) / cpl;
       if (lux > 2) { // don't calculate temperature below 2 lux, math screws up...
-        ct = TCS34725_CT_Coef * float(b_comp) / float(r_comp) + TCS34725_CT_Offset;
+        ct = max(TCS34725_CT_Coef * float(b_comp) / float(r_comp) + TCS34725_CT_Offset, 0.0);
       }
       asyncState = 0;
       return true;
