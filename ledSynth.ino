@@ -319,9 +319,10 @@ void setStatusMessage(char * _text, long millisToShow = -1);
 Adafruit_ADS1115 * pirADS = &faderIntensityPots;
 const int pirADCChannel = 3;
 const int pirLEDChannel = 3;
-int pirLedActive = 0;
+int pirLedActive = 1;
 int pirReading = 0;
 float pirReadingFiltered = 0.0;
+float pirLevelNormalised = 0;
 
 // STATE
 
@@ -465,13 +466,13 @@ void loop() {
   int fadeSteps = 500;
 
   // TOUCH
-  
-  if((cap.touched() & (1 << 1))){
+
+  if ((cap.touched() & (1 << 1))) {
     previousTouchIntensity = thisFrameMillis;
   }
   touchFaderIntensity = (thisFrameMillis - previousTouchIntensity <  touchTimeout);
-  
-  if((cap.touched() & (1 << 0))){
+
+  if ((cap.touched() & (1 << 0))) {
     previousTouchTemperature = thisFrameMillis;
   }
   touchFaderTemperature = (thisFrameMillis - previousTouchTemperature < touchTimeout);
@@ -674,33 +675,31 @@ void loop() {
       if (thisFrameMillis - quadLastTickMillis < 4000 && !mixLevelShown) {
         lcd.setCursor(1, 0);
         if (remoteChannel == 0) {
-          lcd.print(" uses sensor  S");
+          lcd.print(" light sensor L");
         } else if (remoteChannel == conf->id) {
-          lcd.print(" is manual    M");
+          lcd.print(" movement     M");
         } else {
-          lcd.print(" connected to ");
+          lcd.print(" remote node  ");
           lcd.print(remoteChannel);
         }
       } else {
         if (!mixLevelShown) mixLevelShown = true;
         lcd.setCursor(1, 0);
+        lcd.write(byte(3));
+        for (int i = 0; i < remoteMixLevel / 5; i++)
+          lcd.write(byte(6));
+        if (remoteMixLevel < remoteMixMax) {
+          lcd.write(byte(7));
+          for (int i = (remoteMixLevel / 5); i < (remoteMixMax / 5) - 1; i++)
+            lcd.write(byte(5));
+        }
+        lcd.write(byte(4));
         if (remoteChannel == conf->id) {
-          lcd.print("              M");
+          lcd.print('M');
+        } else if (remoteChannel == 0) {
+          lcd.print('L');
         } else {
-          lcd.write(byte(3));
-          for (int i = 0; i < remoteMixLevel / 5; i++)
-            lcd.write(byte(6));
-          if (remoteMixLevel < remoteMixMax) {
-            lcd.write(byte(7));
-            for (int i = (remoteMixLevel / 5); i < (remoteMixMax / 5) - 1; i++)
-              lcd.write(byte(5));
-          }
-          lcd.write(byte(4));
-          if (remoteChannel == 0) {
-            lcd.print('S');
-          } else {
-            lcd.print(remoteChannel);
-          }
+          lcd.print(remoteChannel);
         }
       }
 
@@ -714,7 +713,7 @@ void loop() {
 
       // intensity input
 
-      if (touchFaderIntensity || remoteChannel == conf->id) {
+      if (touchFaderIntensity) {
         if (faderIntensity._state == Fader::F_AUTOMATIC) {
           faderIntensity.setManual();
         } else {
@@ -746,7 +745,7 @@ void loop() {
 
       // temperature input
 
-      if (touchFaderTemperature || remoteChannel == conf->id) {
+      if (touchFaderTemperature) {
         if (faderTemperature._state == Fader::F_AUTOMATIC) {
           faderTemperature.setManual();
         } else {
@@ -784,15 +783,32 @@ void loop() {
         gUpdateValue(&lightSensorCt);
         gUpdateValue(&lightSensorLevelPromille);
       }
+      
+      // READ MOVEMENT SENSOR
+      
+      if(pirReading == 1){
+        pirLevelNormalised = min(pirLevelNormalised + 0.01, 2.0);
+      } else {
+        if(pirLevelNormalised < 0.25){
+          pirLevelNormalised = max(pirLevelNormalised - 0.0075, 0.0);
+        } else {
+          pirLevelNormalised *= 0.995;
+        }
+      }
 
       // CALCULATE OUTPUT
 
       if (remoteChannel == conf->id) {
 
-        // manual
+        // movement
+        
+        int pirLevelPromille = min(round(pirLevelNormalised * 1000.0), 1000);
 
-        intensityPromilleOutput = intensityPromilleManual;
-        temperatureKelvinOutput = temperatureKelvinManual;
+        int intensityPromilleSensorRanged = map(pirLevelPromille, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+        int temperatureKelvinSensorRanged = map(pirLevelPromille, 0, 1000, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
+
+        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
 
       } else if (remoteChannel != 0) {
 
@@ -830,7 +846,6 @@ void loop() {
       // SET FADER OUTPUTS IF NOT TOUCHED
 
       if (!touchFaderIntensity) {
-        if (remoteChannel != conf->id) {
           if (faderIntensity._state == Fader::F_MANUAL) {
             faderIntensity.setAutomatic();
           }
@@ -838,11 +853,9 @@ void loop() {
             faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 1.0 * faderIntensityRangeBottomPromille, 1.0 * faderIntensityRangeTopPromille, 0.0, 1.0 )), 0.0));
           else
             faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 0.0, 1000.0, 0.0, 1.0 )), 0.0));
-        }
       }
 
       if (!touchFaderTemperature) {
-        if (remoteChannel != conf->id) {
           if (faderTemperature._state == Fader::F_MANUAL) {
             faderTemperature.setAutomatic();
           }
@@ -850,10 +863,9 @@ void loop() {
             faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * faderTemperatureRangeBottomKelvin, 1.0 * faderTemperatureRangeTopKelvin, 0.0, 1.0 )), 0.0));
           else
             faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax, 0.0, 1.0 )), 0.0));
-        }
       }
 
-      faderIntensity.setUseRanges(useFaderRanges > 0 || !remoteChannel == 0);
+      faderIntensity.setUseRanges(useFaderRanges > 0 || !remoteChannel == 0); // light sensor has other logic
       faderTemperature.setUseRanges(useFaderRanges > 0);
       faderIntensity.update();
       faderTemperature.update();
@@ -938,7 +950,7 @@ void loop() {
       break;
 
   }
-  
+
   /*
   //  Battery level
 
@@ -955,7 +967,7 @@ void loop() {
     lcd.write(byte(2));
   }
   */
-  
+
   int newPirReading = pirADS->readADC_SingleEnded(pirADCChannel);
   if (newPirReading > 10000) {
     pirReading = 1;
