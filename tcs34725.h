@@ -80,7 +80,7 @@ const tcs34725::tcs_agc tcs34725::agc_lst[] = {
   { TCS34725_GAIN_16X, TCS34725_INTEGRATIONTIME_154MS, 16790, 63000 },
   { TCS34725_GAIN_4X,  TCS34725_INTEGRATIONTIME_154MS, 15740, 63000 },
   { TCS34725_GAIN_1X,  TCS34725_INTEGRATIONTIME_154MS, 15740, 0 }
-//  { TCS34725_GAIN_1X,  TCS34725_INTEGRATIONTIME_50MS,  15740, 0 }
+  //  { TCS34725_GAIN_1X,  TCS34725_INTEGRATIONTIME_50MS,  15740, 0 }
 };
 tcs34725::tcs34725() : agc_cur(0), isAvailable(0), isSaturated(0) {
 }
@@ -183,11 +183,16 @@ boolean tcs34725::getDataAsync(void) {
       c = c_raw;
 
       // DN40 calculations
+      // TODO avoid negative ct values ....
       ir = (r + g + b > c) ? (r + g + b - c) / 2 : 0;
-      r_comp = max(r - ir, 0);
-      g_comp = max(g - ir, 0);
-      b_comp = max(b - ir, 0);
-      c_comp = max(c - ir, 0);
+      long r_ir = long(r) - ir;
+      long g_ir = long(g) - ir;
+      long b_ir = long(b) - ir;
+      long c_ir = long(c) - ir;
+      r_comp = constrain(r_ir, 0, 2147483647L);
+      g_comp = constrain(g_ir, 0, 2147483647L);
+      b_comp = constrain(b_ir, 0, 2147483647L);
+      c_comp = constrain(c_ir, 0, 2147483647L);
       cratio = float(ir) / float(c);
 
       saturation = ((256 - atime) > 63) ? 65535 : 1024 * (256 - atime);
@@ -198,7 +203,8 @@ boolean tcs34725::getDataAsync(void) {
 
       lux = (TCS34725_R_Coef * float(r_comp) + TCS34725_G_Coef * float(g_comp) + TCS34725_B_Coef * float(b_comp)) / cpl;
       if (lux > 2) { // don't calculate temperature below 2 lux, math screws up...
-        ct = max(TCS34725_CT_Coef * float(b_comp) / float(r_comp) + TCS34725_CT_Offset, 0.0);
+        float ct_raw = TCS34725_CT_Coef * float(b_comp) / float(r_comp) + TCS34725_CT_Offset;
+        ct = max(ct_raw, 0.0);
       }
       asyncState = 0;
       return true;

@@ -45,8 +45,8 @@
 // IDENTITY
 
 const String identityString = "light node";
-const int versionMajor = 0;
-const int versionMinor = 10;
+const int versionMajor = 1;
+const int versionMinor = 0;
 int newID = 0;
 
 
@@ -189,6 +189,7 @@ double displayGreen = 1.0;
 double displayBlue = 1.0;
 
 
+/*
 // BATTERY
 
 const byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
@@ -203,7 +204,7 @@ const byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLeve
 const int batteryLevels = 7;
 int batteryLevel = 0;
 float batteryLevelSmoothNormalised = 0.0;
-
+*/
 
 // FADERS
 
@@ -246,15 +247,16 @@ int faderTemperatureRangeBottom = 0;
 // CAPACITIVE TOUCH SENSOR
 
 Adafruit_MPR121 cap = Adafruit_MPR121();
-uint16_t capLastTouched = 0;
-uint16_t capCurrTouched = 0;
 
+unsigned long previousTouchIntensity = 0;
+unsigned long previousTouchTemperature = 0;
+unsigned long touchTimeout = 250;
 
 // LIGHT SENSOR
 
 tcs34725 lightSensor; // I2C 0x29
-int lightSensorLux_raw;
-int lightSensorCt_raw;
+float lightSensorLux_raw;
+float lightSensorCt_raw;
 int lightSensorR_raw;
 int lightSensorG_raw;
 int lightSensorB_raw;
@@ -289,7 +291,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 bool bleAdvertising = false;
 TinyQueue<char> tq(20 * 10);
-long millisLastCommand = 0;
+unsigned long millisPreviousCommand = 0;
 int tqSize = 0;
 
 // GUINO
@@ -342,7 +344,7 @@ void statefulLCDclear(int theState = -1);
 
 unsigned long millisLastFrame = 0;
 unsigned long frameCount = 0;
-int millisPerFrame = 0;
+unsigned long millisPerFrame = 0;
 
 
 // DMX BOARD
@@ -362,7 +364,7 @@ void setup() {
   }
 
   // BATTERY
-  pinMode(1, INPUT);
+  // pinMode(1, INPUT);
 
   // LIGHT SENSOR
   lightSensorOnline = lightSensor.begin();
@@ -412,7 +414,7 @@ void setup() {
   // LCD CHARS
   createChar(lcd, 0, lcdCharBluetooth);   //Bluetooth Icon
   createChar(lcd, 1, lcdCharNumbers[min(9, conf->id)]); //Fat indentity number
-  createChar(lcd, 2, lcdCharBatteryLevels[batteryLevel]); // Battery icon
+  // createChar(lcd, 2, lcdCharBatteryLevels[batteryLevel]); // Battery icon
   createChar(lcd, 3, lcdCharBarGraphs[6]); // Bar chart
   createChar(lcd, 4, lcdCharBarGraphs[7]); // Bar chart
   createChar(lcd, 5, lcdCharBarGraphs[0]); // Bar chart
@@ -456,14 +458,23 @@ void setup() {
 }
 
 void loop() {
-  long thisFrameMillis = millis();
+  unsigned long thisFrameMillis = millis();
   double t = thisFrameMillis * 0.001 * 0.5;
   millisPerFrame = thisFrameMillis - millisLastFrame;
 
   int fadeSteps = 500;
 
-  touchFaderIntensity = (cap.touched() & (1 << 1));
-  touchFaderTemperature = (cap.touched() & (1 << 0));
+  // TOUCH
+  
+  if((cap.touched() & (1 << 1))){
+    previousTouchIntensity = thisFrameMillis;
+  }
+  touchFaderIntensity = (thisFrameMillis - previousTouchIntensity <  touchTimeout);
+  
+  if((cap.touched() & (1 << 0))){
+    previousTouchTemperature = thisFrameMillis;
+  }
+  touchFaderTemperature = (thisFrameMillis - previousTouchTemperature < touchTimeout);
 
   switch (state) {
 
@@ -660,7 +671,7 @@ void loop() {
         }
         quadPos = 0;
       }
-      if (quadLastTickMillis > thisFrameMillis - 4000 && !mixLevelShown) {
+      if (thisFrameMillis - quadLastTickMillis < 4000 && !mixLevelShown) {
         lcd.setCursor(1, 0);
         if (remoteChannel == 0) {
           lcd.print(" uses sensor  S");
@@ -696,7 +707,7 @@ void loop() {
       // GET REMOTE INPUT
 
       if (guino_update()) {
-        //millisLastCommand = thisFrameMillis;
+        //millisPreviousCommand = thisFrameMillis;
       }
 
       // GET FADER INPUTS IF TOUCHED
@@ -855,7 +866,7 @@ void loop() {
       // Display
 
       lcd.setCursor(15, 1);
-      if (thisFrameMillis > millisLastCommand - 5) {
+      if (thisFrameMillis - millisPreviousCommand > 5) {
         lcd.write(byte(0)); // bluetooth icon
       } else {
         lcd.print(" ");
@@ -927,6 +938,8 @@ void loop() {
       break;
 
   }
+  
+  /*
   //  Battery level
 
   batteryLevelSmoothNormalised *= 0.99;
@@ -941,7 +954,8 @@ void loop() {
     lcd.setCursor(0, 1);
     lcd.write(byte(2));
   }
-
+  */
+  
   int newPirReading = pirADS->readADC_SingleEnded(pirADCChannel);
   if (newPirReading > 10000) {
     pirReading = 1;
@@ -982,7 +996,7 @@ extern "C" {
     for (int i = 0; i < len; i++) {
       tq.enqueue(data[i]);
     }
-    millisLastCommand = millisLastFrame;
+    millisPreviousCommand = millisLastFrame;
   }
 
   void RFduinoBLE_onAdvertisement(bool start)
