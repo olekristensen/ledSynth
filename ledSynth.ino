@@ -45,7 +45,7 @@
 // IDENTITY
 
 const String identityString = "light node";
-const int versionMajor = 1;
+const int versionMajor = 2;
 const int versionMinor = 0;
 int newID = 0;
 
@@ -299,7 +299,7 @@ int tqSize = 0;
 int titleLabelId = 0;
 int saveConfigButtonId = 0;
 int calibrateButtonId = 0;
-int statusMessageLabelId = 0;
+int MessageLabelId = 0;
 int lightsensorButtonId = 0;
 int idSliderId = 0;
 int remoteChannelSliderId = 0;
@@ -308,10 +308,38 @@ int pidAId = 0;
 int pidPId = 0;
 int pidIId = 0;
 int pidDId = 0;
-String statusMessage = "";
-long statusMessageMillisToClear = -1;
-bool statusMessageCleared = false;
-void setStatusMessage(char * _text, long millisToShow = -1);
+
+namespace hardware {
+enum items {
+  ownID,
+  remoteID,
+  versionMajor,
+  versionMinor,
+  mixRemote,
+  mixNoise,
+  intensityFader,
+  temperatureFader,
+  intensityRemote,
+  temperatureRemote,
+  intensityNoise,
+  temperatureNoise,
+  intensityOutput,
+  temperatureOutput,
+  intensityRangeTop,
+  intensityRangeBottom,
+  temperatureRangeTop,
+  temperatureRangeBottom,
+  useRanges,
+  movementSensor,
+  movementSensorLevel,
+  movementSensorLedActive,
+  lightSensorTemperature,
+  lightSensorLux,
+  lightSensorLightLevel,
+  doFaderCalibration,
+  doSaveId
+};
+};
 
 
 // PIR (MOVEMENT) SENSOR
@@ -783,13 +811,13 @@ void loop() {
         gUpdateValue(&lightSensorCt);
         gUpdateValue(&lightSensorLevelPromille);
       }
-      
+
       // READ MOVEMENT SENSOR
-      
-      if(pirReading == 1){
+
+      if (pirReading == 1) {
         pirLevelNormalised = min(pirLevelNormalised + 0.01, 2.0);
       } else {
-        if(pirLevelNormalised < 0.25){
+        if (pirLevelNormalised < 0.25) {
           pirLevelNormalised = max(pirLevelNormalised - 0.0075, 0.0);
         } else {
           pirLevelNormalised *= 0.995;
@@ -801,7 +829,7 @@ void loop() {
       if (remoteChannel == conf->id) {
 
         // movement
-        
+
         int pirLevelPromille = min(round(pirLevelNormalised * 1000.0), 1000);
 
         int intensityPromilleSensorRanged = map(pirLevelPromille, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
@@ -846,23 +874,23 @@ void loop() {
       // SET FADER OUTPUTS IF NOT TOUCHED
 
       if (!touchFaderIntensity) {
-          if (faderIntensity._state == Fader::F_MANUAL) {
-            faderIntensity.setAutomatic();
-          }
-          if (faderIntensityRangeBottomPromille != faderIntensityRangeTopPromille)
-            faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 1.0 * faderIntensityRangeBottomPromille, 1.0 * faderIntensityRangeTopPromille, 0.0, 1.0 )), 0.0));
-          else
-            faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 0.0, 1000.0, 0.0, 1.0 )), 0.0));
+        if (faderIntensity._state == Fader::F_MANUAL) {
+          faderIntensity.setAutomatic();
+        }
+        if (faderIntensityRangeBottomPromille != faderIntensityRangeTopPromille)
+          faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 1.0 * faderIntensityRangeBottomPromille, 1.0 * faderIntensityRangeTopPromille, 0.0, 1.0 )), 0.0));
+        else
+          faderIntensity.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * intensityPromilleOutput, 0.0, 1000.0, 0.0, 1.0 )), 0.0));
       }
 
       if (!touchFaderTemperature) {
-          if (faderTemperature._state == Fader::F_MANUAL) {
-            faderTemperature.setAutomatic();
-          }
-          if (faderTemperatureRangeBottomKelvin != faderTemperatureRangeTopKelvin)
-            faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * faderTemperatureRangeBottomKelvin, 1.0 * faderTemperatureRangeTopKelvin, 0.0, 1.0 )), 0.0));
-          else
-            faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax, 0.0, 1.0 )), 0.0));
+        if (faderTemperature._state == Fader::F_MANUAL) {
+          faderTemperature.setAutomatic();
+        }
+        if (faderTemperatureRangeBottomKelvin != faderTemperatureRangeTopKelvin)
+          faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * faderTemperatureRangeBottomKelvin, 1.0 * faderTemperatureRangeTopKelvin, 0.0, 1.0 )), 0.0));
+        else
+          faderTemperature.setSetpointNormalised(max(min(1.0, mapFloat(1.0 * temperatureKelvinOutput, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax, 0.0, 1.0 )), 0.0));
       }
 
       faderIntensity.setUseRanges(useFaderRanges > 0 || !remoteChannel == 0); // light sensor has other logic
@@ -942,11 +970,6 @@ void loop() {
       tqSize = tq.size();
       //gUpdateValue(&tqSize);
 
-
-      if (statusMessageMillisToClear < thisFrameMillis && !statusMessageCleared) {
-        gUpdateLabel(statusMessageLabelId, "connected");
-        statusMessageCleared = true;
-      }
       break;
 
   }
@@ -1038,158 +1061,77 @@ void lcdPrintNumberPadded(int number, int len, char padding) {
 // This is where you setup your interface
 void gInit()
 {
-  gAddLabel(" ", 2);
-  String identityWithNumber = identityString + " " + conf->id;
-  char identityChars[identityWithNumber.length() + 1];
-  identityWithNumber.toCharArray(identityChars, identityWithNumber.length() + 1);
-  titleLabelId = gAddLabel(identityChars, 0);
-  gAddLabel(" ", 2);
-  gAddSpacer(1);
 
-  gAddLabel("FADERS", 2);
-  gAddSlider(0, 1000, "intensity fader", &intensityPromilleManual);
-  gAddSlider(temperatureKelvinMin, temperatureKelvinMax, "temperature fader", &temperatureKelvinManual);
+  gBindInt(0, maxRemoteChannels, hardware::ownID, &newID);
+  gBindInt(0, maxRemoteChannels, hardware::remoteID, &remoteChannel);
+  gUpdateConstValue(hardware::versionMajor, versionMajor);
+  gUpdateConstValue(hardware::versionMinor, versionMinor);
+  gBindInt(0, remoteMixMax, hardware::mixRemote, &remoteMixLevel);
+  // mixNoise,
 
-  gAddSlider(0, 1000, "intensity remote", &intensityPromilleRemote);
-  gAddSlider(temperatureKelvinMin, temperatureKelvinMax, "temperature remote", &temperatureKelvinRemote);
+  gBindInt(0, 1000,                                      hardware::intensityFader,           &intensityPromilleManual);
+  gBindInt(temperatureKelvinMin, temperatureKelvinMax,   hardware::temperatureFader,         &temperatureKelvinManual);
+  gBindInt(0, 1000,                                      hardware::intensityRemote,          &intensityPromilleRemote);
+  gBindInt(temperatureKelvinMin, temperatureKelvinMax,   hardware::temperatureRemote,        &temperatureKelvinRemote);
 
-  gAddSlider(0, 1000, "intensity output", &intensityPromilleOutput);
-  gAddSlider(temperatureKelvinMin, temperatureKelvinMax, "temperature output", &temperatureKelvinOutput);
+  // intensityNoise,
+  // temperatureNoise,
 
-  calibrateButtonId = gAddButton("calibrate");
+  gBindInt(0, 1000,                                      hardware::intensityOutput,          &intensityPromilleOutput);
+  gBindInt(temperatureKelvinMin, temperatureKelvinMax,   hardware::temperatureOutput,        &temperatureKelvinOutput);
+  gBindInt(0, 1023,                                      hardware::intensityRangeTop,        &(faderIntensity._potRangeTopValue));
+  gBindInt(0, 1023,                                      hardware::intensityRangeBottom,     &(faderIntensity._potRangeBottomValue));
+  gBindInt(0, 1023,                                      hardware::temperatureRangeTop,      &(faderTemperature._potRangeTopValue));
+  gBindInt(0, 1023,                                      hardware::temperatureRangeBottom,   &(faderTemperature._potRangeBottomValue));
+  gBindInt(0, 1,                                         hardware::useRanges,                &useFaderRanges);
+  gBindInt(0, 1,                                         hardware::movementSensor,           &pirReading);
+  gBindInt(0, 1,                                         hardware::movementSensorLedActive,  &pirLedActive);
+  // movementSensorLevel
 
-  /*  gAddLabel("PID", 2);
+  gBindInt(0, 30000,                                     hardware::lightSensorLux,           &lightSensorLux);
+  gBindInt(0, 10000,                                     hardware::lightSensorTemperature,   &lightSensorCt);
+  gBindInt(0, 1000,                                      hardware::lightSensorLightLevel,    &lightSensorLevelPromille);
 
-    pidAId = gAddSlider(0, 1000, "A", &faderPidAint);
-    pidPId = gAddSlider(0, 1000, "P", &faderPidPint);
-    pidIId = gAddSlider(0, 10000, "I", &faderPidIint);
-    pidDId = gAddSlider(0, 1000,  "D", &faderPidDint);
-  */
 
-  gAddLabel("RANGES", 2);
-  gAddSlider(0, 1023, "intensity top", &(faderIntensity._potRangeTopValue));
-  gAddSlider(0, 1023, "intensity bottom", &(faderIntensity._potRangeBottomValue));
-  gAddSlider(0, 1023, "temperature top", &(faderTemperature._potRangeTopValue));
-  gAddSlider(0, 1023, "temperature bottom", &(faderTemperature._potRangeBottomValue));
-  gAddToggle("USE RANGES", &useFaderRanges);
-
-  gAddSpacer(1);
-  if (lightSensorOnline) {
-    gAddLabel("SENSOR", 2);
-    gAddSlider(0, 30000, "lux", &lightSensorLux);
-    gAddSlider(0, 10000, "ct", &lightSensorCt);
-    //    gAddSlider(-1, 5, "agc", &lightSensorAgc);
-    gAddSlider(0, 1000, "light level", &lightSensorLevelPromille);
-    //    gAddSlider(0, 10000, "light step", &lightSensorStepInt);
-    lightsensorButtonId = gAddButton("measure");
-    //gAddSlider(0, 1023, "r", &lightSensorR);
-    //gAddSlider(0, 1023, "g", &lightSensorG);
-    //gAddSlider(0, 1023, "b", &lightSensorB);
-    //gAddSlider(0, 1023, "c", &lightSensorC);
-  } else {
-    gAddLabel("SENSOR OFFLINE", 2);
-  }
-  gAddSpacer(1);
-
-  gAddLabel("MIXER", 2);
-  remoteMixLevelSliderId = gAddSlider(0, remoteMixMax, "mixer", &remoteMixLevel);
-  gAddSpacer(1);
-
-  gAddLabel("IDENTITY", 2);
-  idSliderId = gAddSlider(0, maxRemoteChannels, "ID", &newID);
-  saveConfigButtonId = gAddButton("save id");
-  remoteChannelSliderId = gAddSlider(0, maxRemoteChannels, "CHANNEL", &remoteChannel);
-  gAddSpacer(1);
-
-  //* GRAPHS
-  // gAddMovingGraph("TQsize", 0, tq.buffersize(), &tqSize, 10);
-  // gAddMovingGraph("BATTERY", 0, batteryLevels, &batteryLevel, 10);
-  // gAddMovingGraph("MILLIS/FRAME", 0, 41, &millisPerFrame, 10);
-  gAddSlider(0, 1, "movement", &pirReading);
-  gAddToggle("LED movement indicator", &pirLedActive);
-  gAddSpacer(1);
-  //*/
-
-  statusMessageLabelId = gAddLabel("connecting", 2);
-  setStatusMessage("connected");
-}
-
-void updateTitle() {
-  String identityWithNumber = identityString + " " +  conf->id;
-  char identityChars[identityWithNumber.length() + 1];
-  identityWithNumber.toCharArray(identityChars, identityWithNumber.length() + 1);
-  gUpdateLabel(titleLabelId, identityChars);
-}
-
-void setStatusMessage(char * _text, long millisToShow) {
-  statusMessage = _text;
-  statusMessageCleared = false;
-  if (millisToShow < 0) {
-    statusMessageMillisToClear = millis() + 2000;
-  } else {
-    statusMessageMillisToClear = millis() + millisToShow;
-  }
-  gUpdateLabel(statusMessageLabelId, _text);
-}
-
-void gButtonPressed(int id, int value)
-{
-  if (saveConfigButtonId == id && value > 0)
-  {
-    if (newID != conf->id) {
-      saveConf(newID);
-      updateTitle();
-      setStatusMessage("saved new id");
-      //gUpdateLabel(saveConfigButtonId, " ");
-    }
-  }
-  if (calibrateButtonId == id && value > 0)
-  {
-    setStatusMessage("calibrating faders");
-    calibrateFaders();
-    setStatusMessage("faders calibrated", 5000);
-  }
-  if (lightsensorButtonId == id && value > 0)
-  {
-    while (!measureLight()) {
-      ;
-    }
-    gUpdateValue(&lightSensorLux);
-    gUpdateValue(&lightSensorCt);
-    gUpdateValue(&lightSensorAgc);
-  }
+  // doFaderCalibration,
+  // doSaveId
+  //  saveConfigButtonId = gAddButton("save id");
 
 }
 
 void gItemUpdated(int id)
 {
 
-  if (remoteMixLevelSliderId == id) {
+  if (hardware::mixRemote == id) {
     // update bar graph incremental char on remote mix setting
     createChar(lcd, 7, lcdCharBarGraphs[remoteMixLevel % 5]);
   }
 
-  if (id == pidAId || id == pidPId || id == pidIId || id == pidDId) {
-
-    faderPidA = faderPidAint / 100.0;
-    faderPidP = (faderPidPint / 100.0) * faderPidA;
-    faderPidI = (faderPidIint / 100.0) * faderPidA;
-    faderPidD = (faderPidDint / 10000.0) * faderPidA;
-    faderIntensity._pid->SetTunings(faderPidP, faderPidI, faderPidD);
-    faderTemperature._pid->SetTunings(faderPidP, faderPidI, faderPidD);
+  if (hardware::doSaveId == id)
+  {
+    if (newID != conf->id) {
+      saveConf(newID);
+      gUpdateConstValue(hardware::doSaveId, 0);
+    }
+  }
+  
+  if (hardware::doFaderCalibration == id)
+  {
+    calibrateFaders();
+    gUpdateConstValue(hardware::doFaderCalibration, 0);
   }
 
+  /*
+    if (id == pidAId || id == pidPId || id == pidIId || id == pidDId) {
 
-  /*  if(idSliderId == id){
-      gUpdateLabel(saveConfigButtonId, "save id");
+      faderPidA = faderPidAint / 100.0;
+      faderPidP = (faderPidPint / 100.0) * faderPidA;
+      faderPidI = (faderPidIint / 100.0) * faderPidA;
+      faderPidD = (faderPidDint / 10000.0) * faderPidA;
+      faderIntensity._pid->SetTunings(faderPidP, faderPidI, faderPidD);
+      faderTemperature._pid->SetTunings(faderPidP, faderPidI, faderPidD);
     }
   */
-  /*
-    if(rotaryRID == id || rotaryGID == id || rotaryBID == id)
-    {
-      gSetColor(r,g,b);
-    }
-    */
 }
 
 void saveConf(int id) {
@@ -1217,6 +1159,7 @@ void calibrateFaders() {
   faderIntensity.calibrate();
   statefulLCDclear();
 }
+
 boolean measureLight() {
   boolean newData = false;
   if (lightSensor.getDataAsync()) {
