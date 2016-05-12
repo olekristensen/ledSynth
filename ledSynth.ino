@@ -351,6 +351,7 @@ int pirLedActive = 1;
 int pirReading = 0;
 float pirReadingFiltered = 0.0;
 float pirLevelNormalised = 0;
+int pirLevelPromille = 0;
 
 // STATE
 
@@ -824,13 +825,14 @@ void loop() {
         }
       }
 
+      pirLevelPromille = min(round(pirLevelNormalised * 1000.0), 1000);
+      gUpdateValue(&pirLevelPromille);
+
       // CALCULATE OUTPUT
 
       if (remoteChannel == conf->id) {
 
         // movement
-
-        int pirLevelPromille = min(round(pirLevelNormalised * 1000.0), 1000);
 
         int intensityPromilleSensorRanged = map(pirLevelPromille, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
         int temperatureKelvinSensorRanged = map(pirLevelPromille, 0, 1000, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
@@ -1086,7 +1088,7 @@ void gInit()
   gBindInt(0, 1,                                         hardware::useRanges,                &useFaderRanges);
   gBindInt(0, 1,                                         hardware::movementSensor,           &pirReading);
   gBindInt(0, 1,                                         hardware::movementSensorLedActive,  &pirLedActive);
-  // movementSensorLevel
+  gBindInt(0, 1000,                                      hardware::movementSensorLevel,      &pirLevelPromille);
 
   gBindInt(0, 30000,                                     hardware::lightSensorLux,           &lightSensorLux);
   gBindInt(0, 10000,                                     hardware::lightSensorTemperature,   &lightSensorCt);
