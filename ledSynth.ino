@@ -46,7 +46,7 @@
 
 const String identityString = "light node";
 const int versionMajor = 2;
-const int versionMinor = 0;
+const int versionMinor = 1;
 int newID = 0;
 
 
@@ -59,6 +59,9 @@ bool mixLevelShown = true;
 int mixLevelDisplayChars = 12;
 int remoteMixMax = 5 * mixLevelDisplayChars;
 int useFaderRanges = 1;
+int remoteOverride = 0;
+int remoteWasOverriding = 0;
+int identify = 0;
 
 int intensityPromilleManual;
 int temperatureKelvinManual = 2700;
@@ -190,20 +193,20 @@ double displayBlue = 1.0;
 
 
 /*
-// BATTERY
+  // BATTERY
 
-const byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
-const byte lcdCharBatteryLevel5[8] = {0x6, 0x9, 0xf, 0xf, 0xf, 0xf, 0xf};
-const byte lcdCharBatteryLevel4[8] = {0x6, 0x9, 0x9, 0xf, 0xf, 0xf, 0xf};
-const byte lcdCharBatteryLevel3[8] = {0x6, 0x9, 0x9, 0x9, 0xf, 0xf, 0xf};
-const byte lcdCharBatteryLevel2[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0xf, 0xf};
-const byte lcdCharBatteryLevel1[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
-const byte lcdCharBatteryLevel0[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
-const byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLevel1, lcdCharBatteryLevel2, lcdCharBatteryLevel3, lcdCharBatteryLevel4, lcdCharBatteryLevel5, lcdCharBatteryLevel6 };
+  const byte lcdCharBatteryLevel6[8] = {0x6, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf};
+  const byte lcdCharBatteryLevel5[8] = {0x6, 0x9, 0xf, 0xf, 0xf, 0xf, 0xf};
+  const byte lcdCharBatteryLevel4[8] = {0x6, 0x9, 0x9, 0xf, 0xf, 0xf, 0xf};
+  const byte lcdCharBatteryLevel3[8] = {0x6, 0x9, 0x9, 0x9, 0xf, 0xf, 0xf};
+  const byte lcdCharBatteryLevel2[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0xf, 0xf};
+  const byte lcdCharBatteryLevel1[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
+  const byte lcdCharBatteryLevel0[8] = {0x6, 0x9, 0x9, 0x9, 0x9, 0x9, 0xf};
+  const byte * lcdCharBatteryLevels[7] = {lcdCharBatteryLevel0, lcdCharBatteryLevel1, lcdCharBatteryLevel2, lcdCharBatteryLevel3, lcdCharBatteryLevel4, lcdCharBatteryLevel5, lcdCharBatteryLevel6 };
 
-const int batteryLevels = 7;
-int batteryLevel = 0;
-float batteryLevelSmoothNormalised = 0.0;
+  const int batteryLevels = 7;
+  int batteryLevel = 0;
+  float batteryLevelSmoothNormalised = 0.0;
 */
 
 // FADERS
@@ -337,7 +340,9 @@ enum items {
   lightSensorLux,
   lightSensorLightLevel,
   doFaderCalibration,
-  doSaveId
+  doSaveId,
+  identify,
+  remoteOverride
 };
 };
 
@@ -643,10 +648,10 @@ void loop() {
       setDisplayColorRGB(displayRed, displayGreen, displayBlue);
 
       /*
-      // millis per frame
-      lcd.setCursor(0, 1);
-      lcdPrintNumberPadded(thisFrameMillis - millisLastFrame, 2, ' ');
-      //*/
+        // millis per frame
+        lcd.setCursor(0, 1);
+        lcdPrintNumberPadded(thisFrameMillis - millisLastFrame, 2, ' ');
+        //*/
       break;
 
     case S_CONNECTED_SETUP :
@@ -667,71 +672,90 @@ void loop() {
       temperatureKelvinManual = round(mapFloat(faderTemperature.getSetpointNormalised(), 0.0, 1.0, 1.0 * temperatureKelvinMin, 1.0 * temperatureKelvinMax ));
       faderIntensity.setAutomatic();
       faderTemperature.setAutomatic();
+      identify = 0;
       gBegin();
       state = S_CONNECTED_LOOP;
       break;
 
     case S_CONNECTED_LOOP  :
 
-      quadPos += quad.readDelta();
-      if (quadButtonPushes > 0) {
-        if (thisFrameMillis - quadLastClickMillis > 400) {
-          mixLevelShown = !mixLevelShown;
-          quadLastClickMillis = thisFrameMillis;
+
+      if (!remoteWasOverriding > 0 && remoteOverride > 0) {
+        for (int i = 0; i < fadeSteps; i++) {
+          double iNorm = i * 1.0 / fadeSteps * 1.0;
+          iNorm = 0.5 + (sin(2.0 * (iNorm + 0.25) * PI) / 2.0);
+          // blue flash
+          setDisplayColorRGB(displayRed * iNorm * iNorm, displayGreen * iNorm * iNorm, lerp(1.0, displayBlue, iNorm));
+          delay(1);
         }
-        if (!mixLevelShown) quadLastTickMillis = thisFrameMillis;
-        quadButtonPushes = 0;
       }
-      if (abs(quadPos) >= quadPhasesPerTick) {
-        if (mixLevelShown) {
-          remoteMixLevel = max(0, min(remoteMixLevel + ((quadPos / quadPhasesPerTick)), remoteMixMax));
-          createChar(lcd, 7, lcdCharBarGraphs[remoteMixLevel % 5]);
-          gUpdateValue(&remoteMixLevel);
-        } else {
-          remoteChannel = max(0, min(maxRemoteChannels, remoteChannel + (quadPos / quadPhasesPerTick)));
-          gUpdateValue(&remoteChannel);
-          if (remoteChannel == conf->id) {
-            faderIntensity.setManual();
-            faderTemperature.setManual();
-          } else {
-            faderIntensity.setAutomatic();
-            faderTemperature.setAutomatic();
+      remoteWasOverriding = remoteOverride;
+
+      if (!remoteOverride) {
+        quadPos += quad.readDelta();
+        if (quadButtonPushes > 0) {
+          if (thisFrameMillis - quadLastClickMillis > 400) {
+            mixLevelShown = !mixLevelShown;
+            quadLastClickMillis = thisFrameMillis;
           }
-          quadLastTickMillis = thisFrameMillis;
+          if (!mixLevelShown) quadLastTickMillis = thisFrameMillis;
+          quadButtonPushes = 0;
         }
-        quadPos = 0;
-      }
-      if (thisFrameMillis - quadLastTickMillis < 4000 && !mixLevelShown) {
-        lcd.setCursor(1, 0);
-        if (remoteChannel == 0) {
-          lcd.print(" light sensor L");
-        } else if (remoteChannel == conf->id) {
-          lcd.print(" movement     M");
+        if (abs(quadPos) >= quadPhasesPerTick) {
+          if (mixLevelShown) {
+            remoteMixLevel = max(0, min(remoteMixLevel + ((quadPos / quadPhasesPerTick)), remoteMixMax));
+            createChar(lcd, 7, lcdCharBarGraphs[remoteMixLevel % 5]);
+            gUpdateValue(&remoteMixLevel);
+          } else {
+            remoteChannel = max(0, min(maxRemoteChannels, remoteChannel + (quadPos / quadPhasesPerTick)));
+            gUpdateValue(&remoteChannel);
+            if (remoteChannel == conf->id) {
+              faderIntensity.setManual();
+              faderTemperature.setManual();
+            } else {
+              faderIntensity.setAutomatic();
+              faderTemperature.setAutomatic();
+            }
+            quadLastTickMillis = thisFrameMillis;
+          }
+          quadPos = 0;
+        }
+        if (thisFrameMillis - quadLastTickMillis < 4000 && !mixLevelShown) {
+          lcd.setCursor(1, 0);
+          if (remoteChannel == 0) {
+            lcd.print(" light sensor L");
+          } else if (remoteChannel == conf->id) {
+            lcd.print(" movement     M");
+          } else {
+            lcd.print(" remote node  ");
+            lcd.print(remoteChannel);
+          }
         } else {
-          lcd.print(" remote node  ");
-          lcd.print(remoteChannel);
+          if (!mixLevelShown) mixLevelShown = true;
+          lcd.setCursor(1, 0);
+          lcd.write(byte(3));
+          for (int i = 0; i < remoteMixLevel / 5; i++)
+            lcd.write(byte(6));
+          if (remoteMixLevel < remoteMixMax) {
+            lcd.write(byte(7));
+            for (int i = (remoteMixLevel / 5); i < (remoteMixMax / 5) - 1; i++)
+              lcd.write(byte(5));
+          }
+          lcd.write(byte(4));
+          if (remoteChannel == conf->id) {
+            lcd.print('M');
+          } else if (remoteChannel == 0) {
+            lcd.print('L');
+          } else {
+            lcd.print(remoteChannel);
+          }
         }
       } else {
-        if (!mixLevelShown) mixLevelShown = true;
+        quad.readDelta();
+        quadButtonPushes = 0;
         lcd.setCursor(1, 0);
-        lcd.write(byte(3));
-        for (int i = 0; i < remoteMixLevel / 5; i++)
-          lcd.write(byte(6));
-        if (remoteMixLevel < remoteMixMax) {
-          lcd.write(byte(7));
-          for (int i = (remoteMixLevel / 5); i < (remoteMixMax / 5) - 1; i++)
-            lcd.write(byte(5));
-        }
-        lcd.write(byte(4));
-        if (remoteChannel == conf->id) {
-          lcd.print('M');
-        } else if (remoteChannel == 0) {
-          lcd.print('L');
-        } else {
-          lcd.print(remoteChannel);
-        }
+        lcd.print(" override     O");
       }
-
       // GET REMOTE INPUT
 
       if (guino_update()) {
@@ -805,7 +829,7 @@ void loop() {
 
       // READ LIGHT SENSOR
 
-      if (remoteChannel == 0) {
+      if (remoteChannel == 0 || remoteOverride) {
         // light sensor
         measureLight();
         gUpdateValue(&lightSensorLux);
@@ -830,43 +854,45 @@ void loop() {
 
       // CALCULATE OUTPUT
 
-      if (remoteChannel == conf->id) {
+      if (!remoteOverride) {
+        if (remoteChannel == conf->id) {
 
-        // movement
+          // movement
 
-        int intensityPromilleSensorRanged = map(pirLevelPromille, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
-        int temperatureKelvinSensorRanged = map(pirLevelPromille, 0, 1000, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
+          int intensityPromilleSensorRanged = map(pirLevelPromille, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+          int temperatureKelvinSensorRanged = map(pirLevelPromille, 0, 1000, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
 
-        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
-        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+          intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+          temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
 
-      } else if (remoteChannel != 0) {
+        } else if (remoteChannel != 0) {
 
-        // connected
+          // connected
 
-        int intensityPromilleRemoteRanged = map(intensityPromilleRemote, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
-        int temperatureKelvinRemoteRanged = map(temperatureKelvinRemote, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
+          int intensityPromilleRemoteRanged = map(intensityPromilleRemote, 0, 1000, faderIntensityRangeBottomPromille, faderIntensityRangeTopPromille);
+          int temperatureKelvinRemoteRanged = map(temperatureKelvinRemote, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
 
-        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
-        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
-      } else if (remoteChannel == 0) {
+          intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+          temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinRemoteRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+        } else if (remoteChannel == 0) {
 
-        // light sensor
+          // light sensor
 
-        int intensityPromilleSensorRanged = constrain(map(lightSensorLevelPromille, faderIntensityRangeBottomPromille , faderIntensityRangeTopPromille, 0, 1000), 0, 1000);
-        int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
+          int intensityPromilleSensorRanged = constrain(map(lightSensorLevelPromille, faderIntensityRangeBottomPromille , faderIntensityRangeTopPromille, 0, 1000), 0, 1000);
+          int temperatureKelvinSensorRanged = map(lightSensorCt, temperatureKelvinMin, temperatureKelvinMax, faderTemperatureRangeBottomKelvin, faderTemperatureRangeTopKelvin);
 
-        intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
-        temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+          intensityPromilleOutput = round(lerp(intensityPromilleManual, intensityPromilleSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
+          temperatureKelvinOutput = round(lerp(temperatureKelvinManual, temperatureKelvinSensorRanged, mapFloat(remoteMixLevel, 0, remoteMixMax, 0.0, 1.0 )));
 
-      }
+        }
 
-      if (touchFaderIntensity) {
-        intensityPromilleOutput = intensityPromilleManual;
-      }
+        if (touchFaderIntensity) {
+          intensityPromilleOutput = intensityPromilleManual;
+        }
 
-      if (touchFaderTemperature) {
-        temperatureKelvinOutput = temperatureKelvinManual;
+        if (touchFaderTemperature) {
+          temperatureKelvinOutput = temperatureKelvinManual;
+        }
       }
 
       gUpdateValue(&intensityPromilleOutput);
@@ -965,7 +991,17 @@ void loop() {
       } else {
         temperatureToColor(temperatureKelvinOutput, displayRed, displayGreen, displayBlue);
       }
-      setDisplayColorRGB(displayRed, displayGreen, displayBlue);
+
+      if (identify > 0) {
+        float sinusoidal = 0.5 + sin(millis() * 0.001 * TWO_PI) / 2.0;
+        float sinusoidalHalf = 0.5 + sin(((millis() * 0.001) + TWO_PI) * PI) / 2.0;
+        setDisplayColorRGB(lerp(displayRed, 1.0, sinusoidalHalf) * sinusoidal, lerp(displayGreen, 1.0, sinusoidalHalf) * sinusoidal, lerp(displayBlue, 1.0, sinusoidalHalf) * sinusoidal);
+      } else if (remoteOverride > 0) {
+        float sinusoidal = 0.5 + sin(millis() * 0.0005 * TWO_PI) / 2.0;
+        setDisplayColorRGB(lerp(0.0, displayRed, sinusoidal), lerp(0.0, displayGreen, sinusoidal), lerp(1.0, displayBlue, sinusoidal));
+      } else {
+        setDisplayColorRGB(displayRed, displayGreen, displayBlue);
+      }
 
       //gUpdateValue(&millisPerFrame);
       //gUpdateValue(&batteryLevel);
@@ -977,12 +1013,12 @@ void loop() {
   }
 
   /*
-  //  Battery level
+    //  Battery level
 
-  batteryLevelSmoothNormalised *= 0.99;
-  batteryLevelSmoothNormalised += 0.01 * constrain(mapFloat(pow(getBatteryLevelNormalised(), 2), 0.75, 0.975, 0.0, 1.0), 0.0, 1.0);
+    batteryLevelSmoothNormalised *= 0.99;
+    batteryLevelSmoothNormalised += 0.01 * constrain(mapFloat(pow(getBatteryLevelNormalised(), 2), 0.75, 0.975, 0.0, 1.0), 0.0, 1.0);
 
-  if (frameCount % 20 == 0) {
+    if (frameCount % 20 == 0) {
     int newBatteryLevel = round(batteryLevelSmoothNormalised * (batteryLevels - 1));
     if (newBatteryLevel != batteryLevel) {
       batteryLevel = newBatteryLevel;
@@ -990,7 +1026,7 @@ void loop() {
     }
     lcd.setCursor(0, 1);
     lcd.write(byte(2));
-  }
+    }
   */
 
   int newPirReading = pirADS->readADC_SingleEnded(pirADCChannel);
@@ -1094,10 +1130,11 @@ void gInit()
   gBindInt(0, 10000,                                     hardware::lightSensorTemperature,   &lightSensorCt);
   gBindInt(0, 1000,                                      hardware::lightSensorLightLevel,    &lightSensorLevelPromille);
 
+  gBindInt(0, 1,                                         hardware::remoteOverride,           &remoteOverride);
+  gBindInt(0, 1,                                         hardware::identify,                 &identify);
 
-  // doFaderCalibration,
-  // doSaveId
-  //  saveConfigButtonId = gAddButton("save id");
+  // doFaderCalibration, // handled in update
+  // doSaveId            // handled in update
 
 }
 
@@ -1116,7 +1153,7 @@ void gItemUpdated(int id)
       gUpdateConstValue(hardware::doSaveId, 0);
     }
   }
-  
+
   if (hardware::doFaderCalibration == id)
   {
     calibrateFaders();

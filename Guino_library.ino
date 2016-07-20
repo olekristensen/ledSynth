@@ -20,6 +20,7 @@
 #define cmd_setMax 4
 #define cmd_saveToBoard 9
 #define cmd_disconnect 10
+#define cmd_init_done 11
 
 
 boolean guidino_initialized = false;
@@ -68,6 +69,7 @@ boolean guino_update()
           guino_item_counter = 0;
           gInit();
           guidino_initialized = true;
+          gSendCommand(cmd_init_done, 0, 0);
           break;
         case cmd_setValue:
           *(int*)guino_item_values[cmd_data.item] = cmd_data.value;
